@@ -1,0 +1,284 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+from typing import Optional
+
+from .layer import RotaryPositionEmbedding, apply_rotary_pos_emb
+from .topology import DynamicTopologyRouter, get_dynamic_ultrametric_mask
+
+class TernaryQuantize(torch.autograd.Function):
+    @staticmethod
+    @torch.amp.custom_fwd(device_type='cuda', cast_inputs=torch.float32)
+    def forward(ctx, x):
+        x_f32 = x.float()
+        gamma = x_f32.abs().mean(dim=-1, keepdim=True)
+        threshold = 0.5 * gamma
+        
+        x_ternary = torch.zeros_like(x_f32)
+        x_ternary[x_f32 > threshold] = 1.0
+        x_ternary[x_f32 < -threshold] = -1.0
+        
+        ctx.save_for_backward(x_f32, threshold)
+        return x_ternary * gamma
+
+    @staticmethod
+    @torch.amp.custom_bwd(device_type='cuda')
+    def backward(ctx, grad_output):
+        return grad_output
+
+def pack_ternary(x_ternary: torch.Tensor) -> torch.Tensor:
+    """
+    Packs a float tensor containing {-1.0, 0.0, 1.0} into int32.
+    """
+    assert x_ternary.shape[-1] % 16 == 0, "Last dimension must be multiple of 16 for packing"
+    
+    mapped = torch.zeros_like(x_ternary, dtype=torch.int32)
+    mapped[x_ternary == -1.0] = 2
+    mapped[x_ternary == 1.0] = 1
+    
+    shape = list(mapped.shape)
+    shape[-1] = shape[-1] // 16
+    shape.append(16)
+    
+    mapped = mapped.view(shape)
+    packed = torch.zeros(shape[:-1], dtype=torch.int32, device=x_ternary.device)
+    
+    for i in range(16):
+        packed |= (mapped[..., i] << (2 * i))
+        
+    return packed
+
+def unpack_ternary(packed: torch.Tensor, original_shape: tuple) -> torch.Tensor:
+    """
+    Unpacks an int32 tensor back to float tensor containing {-1.0, 0.0, 1.0}.
+    """
+    shape = list(packed.shape)
+    shape.append(16)
+    
+    unpacked = torch.zeros(shape, dtype=torch.int32, device=packed.device)
+    for i in range(16):
+        val = (packed >> (2 * i)) & 3
+        unpacked[..., i] = val
+        
+    unpacked = unpacked.view(original_shape).float()
+    
+    res = torch.zeros_like(unpacked)
+    res[unpacked == 2.0] = -1.0
+    res[unpacked == 1.0] = 1.0
+    
+    return res
+
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    Equiv to torch.repeat_interleave(x, dim=1, repeats=n_rep)
+    hidden_states: (batch, num_key_value_heads, seqlen, head_dim) -> (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
+
+
+class SurgeryLossRamp(nn.Module):
+    """
+    Computes auxiliary loss for Llama Surgery to encourage sparsity.
+    """
+    def __init__(self, lambda_init: float = 0.0, lambda_max: float = 1.0, ramp_steps: int = 1000):
+        super().__init__()
+        self.lambda_init = lambda_init
+        self.lambda_max = lambda_max
+        self.ramp_steps = ramp_steps
+
+    def get_lambda(self, step: int) -> float:
+        if step >= self.ramp_steps:
+            return self.lambda_max
+        return self.lambda_init + (self.lambda_max - self.lambda_init) * (step / self.ramp_steps)
+
+    def forward(self, g_h: torch.Tensor, step: int) -> torch.Tensor:
+        """
+        g_h: Tensor of shape (num_heads,)
+        Loss penalizes dense execution (g_h \approx 0).
+        """
+        lambda_t = self.get_lambda(step)
+        # Average over heads
+        sparsity_penalty = (1.0 - g_h).mean()
+        return lambda_t * sparsity_penalty
+
+class SurgicalLlamaAttention(nn.Module):
+    """
+    Llama Attention modified for Continuous Sparsification (Surgery).
+    Integrates the per-head routing gate to interpolate between dense and sparse topology.
+    """
+    def __init__(self, config, layer_idx: Optional[int] = None):
+        super().__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+        
+        self.embed_dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = getattr(config, "head_dim", self.embed_dim // self.num_heads)
+        
+        # GQA compliance
+        self.num_key_value_heads = getattr(config, "num_key_value_heads", self.num_heads)
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        
+        # Get surgery-specific config params, default to some values if not present
+        self.p = getattr(config, "surgical_p", 2)
+        self.alpha = getattr(config, "surgical_alpha", 10000.0)
+        
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+
+        assert self.head_dim * self.num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
+
+        self.q_proj = nn.Linear(self.embed_dim, self.num_heads * self.head_dim, bias=getattr(config, "attention_bias", False))
+        self.k_proj = nn.Linear(self.embed_dim, self.num_key_value_heads * self.head_dim, bias=getattr(config, "attention_bias", False))
+        self.v_proj = nn.Linear(self.embed_dim, self.num_key_value_heads * self.head_dim, bias=getattr(config, "attention_bias", False))
+        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.embed_dim, bias=getattr(config, "attention_bias", False))
+
+        max_pos_embeddings = getattr(config, "max_position_embeddings", 8192)
+        self.rope = RotaryPositionEmbedding(self.head_dim, max_pos_embeddings)
+        self.attn_dropout = nn.Dropout(getattr(config, "attention_dropout", 0.0))
+        
+        self.router = DynamicTopologyRouter(
+            embed_dim=self.embed_dim,
+            seq_len=max_pos_embeddings,
+            num_heads=self.num_heads,
+            p=self.p
+        )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        past_key_values = None,
+        **kwargs,
+    ):
+        batch_size, seq_len, _ = hidden_states.size()
+        past_key_value = kwargs.get("past_key_value", past_key_values)
+
+        tau = getattr(self.config, "surgical_tau", 1.0)
+        curr_assignments, load_balance_loss = self.router(hidden_states, tau_override=tau)
+        self.current_penalty = load_balance_loss
+
+        if past_key_value is None or seq_len > 1:
+            self._cached_assignments = curr_assignments
+            assignments = curr_assignments
+        else:
+            if hasattr(self, '_cached_assignments') and self._cached_assignments is not None:
+                assignments = torch.cat([self._cached_assignments, curr_assignments], dim=2)
+                self._cached_assignments = assignments
+            else:
+                assignments = curr_assignments
+                self._cached_assignments = assignments
+
+        # Accumulate sparsity penalty during forward pass (REMOVED for gradient checkpointing safety)
+
+        # Project Q, K, V
+        q = self.q_proj(hidden_states).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(hidden_states).view(batch_size, seq_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(hidden_states).view(batch_size, seq_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+
+        # Apply KV cache fake quantization if enabled (QAT)
+        if getattr(self.config, "quantize_kv_cache", False):
+            from .qat import FakeQuantizeSTE
+            kv_bits = getattr(self.config, "kv_cache_bits", 4)
+            q_min = - (2 ** (kv_bits - 1))
+            q_max = (2 ** (kv_bits - 1)) - 1
+            # Channel-wise scaling along the head dimension (dim=-1)
+            k_scale = k.abs().max(dim=-1, keepdim=True).values / q_max
+            v_scale = v.abs().max(dim=-1, keepdim=True).values / q_max
+            k = FakeQuantizeSTE.apply(k, kv_bits, k_scale, q_min, q_max)
+            v = FakeQuantizeSTE.apply(v, kv_bits, v_scale, q_min, q_max)
+
+        # Apply RoPE
+        if position_embeddings is not None:
+            cos, sin = position_embeddings
+            # HF position_embeddings can be 3D or 4D depending on version
+            if cos.dim() == 3:
+                cos = cos.unsqueeze(1)
+                sin = sin.unsqueeze(1)
+            def rotate_half(x):
+                x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
+                return torch.cat((-x2, x1), dim=-1)
+            q = (q * cos) + (rotate_half(q) * sin)
+            k = (k * cos) + (rotate_half(k) * sin)
+        else:
+            cos, sin = self.rope(q)
+            q, k = apply_rotary_pos_emb(q, k, cos, sin)
+
+        if past_key_value is not None:
+            if hasattr(past_key_value, "update"):
+                cache_kwargs = {"sin": getattr(self, "_dummy", None), "cos": getattr(self, "_dummy", None)}
+                k, v = past_key_value.update(k, v, self.layer_idx, cache_kwargs)
+            elif isinstance(past_key_value, tuple):
+                # tuple format: (past_k, past_v)
+                k = torch.cat([past_key_value[0], k], dim=-2)
+                v = torch.cat([past_key_value[1], v], dim=-2)
+                past_key_value = (k, v)
+
+        # Broadcast KV for GQA before attention computation
+        k = repeat_kv(k, self.num_key_value_groups)
+        v = repeat_kv(v, self.num_key_value_groups)
+
+        use_triton = getattr(self.config, "use_triton_sparse_attention", False)
+        if use_triton and seq_len > 1 and q.dtype == torch.float16 and not q.requires_grad:
+            from .kernel import routing_to_block_indices, ultrametric_attention_triton
+            router_indices = routing_to_block_indices(assignments, seq_len=seq_len, block_size=128)
+            out = ultrametric_attention_triton(q, k, v, router_indices, local_window=128, req_depth=2, p=self.p)
+            out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+            out = self.o_proj(out)
+            return out, None
+
+        # Raw attention scores
+        # CRITICAL FIX: Cast to float32 BEFORE matmul to prevent float16 overflow (inf) which causes NaN gradients
+        scores = torch.matmul(q.to(torch.float32), k.to(torch.float32).transpose(-2, -1)) * self.scale
+
+        # Base causal masking (simplified, since HF usually passes attention_mask)
+        # HF passes attention_mask as (batch_size, 1, tgt_len, src_len) with -inf for masked
+        if attention_mask is not None:
+            # Handle possible broadcast shapes
+            scores = scores + attention_mask
+        else:
+            causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=hidden_states.device), diagonal=1)
+            scores = scores.masked_fill(causal_mask, float('-inf'))
+
+        # Dynamic Sparsification
+        L = k.shape[-2]
+        local_window = getattr(self.config, "surgical_local_window", 16)
+        full_mask = get_dynamic_ultrametric_mask(assignments, p=self.p, local_window=local_window).to(hidden_states.device)
+        um_mask_bool = full_mask > 0.5  # Shape: (B, H, S_full, L) or (B, H, L, L)
+        
+        if seq_len == 1 and L > 1:
+            # Decode phase: extract the row for the current absolute token index
+            um_mask_bool = um_mask_bool[:, :, -1:, :]
+            full_mask = full_mask[:, :, -1:, :]
+            
+        sparse_scores = scores.masked_fill(~um_mask_bool, float('-inf'))
+        
+        # CRITICAL FIX: Prevent softmax NaN from all -inf rows (e.g. padded tokens getting fully masked)
+        is_all_neg_inf = (sparse_scores == float('-inf')).all(dim=-1, keepdim=True)
+        sparse_scores = sparse_scores.masked_fill(is_all_neg_inf, 0.0)
+        
+        attn_weights = F.softmax(sparse_scores, dim=-1, dtype=torch.float32)
+        attn_weights = torch.nan_to_num(attn_weights, 0.0)
+
+        # CRITICAL FIX: Multiply by the differentiable soft mask!
+        # The boolean mask blocked gradients to the router. By multiplying by the STE full_mask,
+        # the language modeling loss can successfully backpropagate into the routing assignments!
+        attn_weights = attn_weights * full_mask
+        attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-8)
+
+        attn_weights = attn_weights.to(v.dtype)
+        attn_weights = self.attn_dropout(attn_weights)
+
+        out = torch.matmul(attn_weights, v)
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+        
+        out = self.o_proj(out)
+        
+        return out, attn_weights
+

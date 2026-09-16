@@ -1,0 +1,47 @@
+﻿[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sparse-ai"
+version = "0.1.0"
+description = "Hardware-Accelerated Block-Sparse Attention, Differentiable Ultrametric Routing, and LLaMA Surgery"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Research & Engineering Team" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.28.0",
+    "einops>=0.7.0",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "triton>=2.2.0",
+]
+jax = [
+    "jax>=0.4.26",
+    "jaxlib>=0.4.26",
+]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.7.0",
+    "ruff>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
