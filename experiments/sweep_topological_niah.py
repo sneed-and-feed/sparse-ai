@@ -361,7 +361,7 @@ def plot_retrieval_heatmap(results: Dict[str, Any], output_path: str = "figures/
     fig, ax = plt.subplots(figsize=(12, 4.5), dpi=300)
     cmap = plt.cm.colors.ListedColormap(['#e74c3c', '#27ae60'])
     
-    cax = ax.imshow(matrix, aspect='auto', cmap=cmap, origin='upper', interpolation='nearest')
+    cax = ax.imshow(matrix, aspect='auto', cmap=cmap, origin='upper', interpolation='nearest', vmin=0, vmax=1)
     
     ax.set_yticks(range(len(y_labels)))
     ax.set_yticklabels(y_labels, fontsize=10, fontweight='bold')
