@@ -160,6 +160,97 @@ def warmup_router_niah(
     print("[Router Warmup] Complete. Restoring evaluation mode.\n")
 
 
+def warmup_router_wikitext(
+    model,
+    tokenizer,
+    steps: int = 80,
+    lr: float = 2e-3,
+    device: str = "cuda",
+) -> None:
+    """
+    Wakes up the Dynamic Topology Router strictly via unsupervised next-token prediction
+    on natural language text with load-balancing loss.
+    ABSOLUTELY ZERO synthetic needles, passcode formats, or query patterns.
+    """
+    print(f"\n[Unsupervised Warmup] Training router on WikiText / natural language text ({steps} steps, LR={lr})...")
+    
+    # Freeze backbone, train only routing parameters
+    for name, p in model.named_parameters():
+        if "router" in name or "route" in name:
+            p.requires_grad = True
+        else:
+            p.requires_grad = False
+            
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=1e-4)
+    
+    if hasattr(model, "gradient_checkpointing_enable"):
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        model.gradient_checkpointing_enable()
+        
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # Load text samples
+    corpus_texts = []
+    try:
+        from datasets import load_dataset
+        ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
+        raw_chunks = [t.strip() for t in ds["text"] if len(t.strip()) > 200]
+        corpus_texts = raw_chunks[:max(steps * 2, 200)]
+        print(f"[Data] Loaded {len(corpus_texts)} chunks from wikitext-2-raw-v1.")
+    except Exception as e:
+        print(f"[Notice] Hugging Face datasets not available ({e}). Using embedded multi-domain natural language corpus.")
+        corpus_texts = [
+            "Mathematics is the science and study of quality, structure, space, and change. Mathematicians seek out patterns, formulate new conjectures, and establish truth by rigorous deduction from appropriately chosen axioms and definitions. Through the use of abstraction and logical reasoning, mathematics evolved from counting, calculation, measurement, and the systematic study of the shapes and motions of physical objects.",
+            "The French Revolution was a period of fundamental political and societal change in France that began with the Estates General of 1789 and ended in November 1799 with the formation of the French Consulate. Many of its ideas are considered fundamental principles of liberal democracy, while its values and institutions remain central to modern French political discourse.",
+            "In computer science, an algorithm is a finite sequence of rigorous instructions, typically used to solve a class of specific problems or to perform a computation. Algorithms are always unambiguous and are used as specifications for performing calculations, data processing, automated reasoning, and other tasks.",
+            "Quantum mechanics is a fundamental theory in physics that provides a description of the physical properties of nature at the scale of atoms and subatomic particles. It is the foundation of all quantum physics including quantum chemistry, quantum field theory, quantum technology, and quantum information science.",
+            "The solar system consists of the Sun and the objects that orbit it, whether they orbit it directly or by orbiting other objects that orbit it directly. Of the objects that orbit the Sun directly, the largest are the eight planets, with the remainder being smaller objects, such as dwarf planets and small Solar System bodies.",
+            "Linguistics is the scientific study of human language. It encompasses the analysis of language form, language meaning, and language in context. Linguists traditionally analyze human language by observing an interplay between sound and meaning.",
+            "Photosynthesis is a biological process used by plants and other organisms to convert light energy into chemical energy that, through cellular respiration, can later be released to fuel the organism's activities. Some of this chemical energy is stored in carbohydrate molecules, such as sugars and starches.",
+            "The theory of relativity usually encompasses two interrelated physics theories by Albert Einstein: special relativity and general relativity, proposed and published in 1905 and 1915, respectively. Special relativity applies to all physical phenomena in the absence of gravity.",
+        ]
+
+    model.train()
+    pbar = tqdm(range(steps), desc="Unsupervised WikiText Warmup")
+    
+    for step in pbar:
+        txt = corpus_texts[step % len(corpus_texts)]
+        encoded = tokenizer(txt, return_tensors="pt", max_length=384, truncation=True, padding=False)
+        input_ids = encoded["input_ids"].to(device)
+        
+        if input_ids.shape[1] < 32:
+            input_ids = input_ids.repeat(1, (384 // input_ids.shape[1]) + 1)[:, :384]
+            
+        labels = input_ids.clone()
+        
+        optimizer.zero_grad()
+        outputs = model(input_ids=input_ids, labels=labels)
+        loss = outputs.loss
+        
+        lb_loss = 0.0
+        for layer in model.model.layers:
+            if hasattr(layer.self_attn, 'current_penalty') and layer.self_attn.current_penalty is not None:
+                lb_loss += layer.self_attn.current_penalty
+                
+        total_loss = loss + 0.02 * lb_loss
+        total_loss.backward()
+        optimizer.step()
+        
+        pbar.set_postfix({"loss": f"{loss.item():.3f}", "lb_loss": f"{float(lb_loss):.3f}"})
+        
+    if hasattr(model, "gradient_checkpointing_disable"):
+        model.gradient_checkpointing_disable()
+        
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        
+    model.eval()
+    print("[Unsupervised Warmup] Complete. Restoring evaluation mode.\n")
+
+
 # ============================================================================
 # Single-Trial Evaluation
 # ============================================================================
@@ -396,7 +487,9 @@ def main():
     parser.add_argument("--context_len", type=int, default=4096, help="Target context length (default 4096)")
     parser.add_argument("--num_positions", type=int, default=50, help="Number of random needle positions (default 50)")
     parser.add_argument("--train_steps", type=int, default=80, help="Router warmup training steps (default 80)")
-    parser.add_argument("--skip_warmup", action="store_true", help="Skip router warmup training")
+    parser.add_argument("--skip_warmup", action="store_true", help="Skip router warmup training (frozen router)")
+    parser.add_argument("--init_mode", type=str, default="collapse", choices=["collapse", "random"], help="Router initialization mode: 'collapse' (homotopy baseline) or 'random' (untrained random projection)")
+    parser.add_argument("--warmup_dataset", type=str, default="niah", choices=["niah", "wikitext"], help="Dataset for router warmup: 'niah' (task-specific) or 'wikitext' (unsupervised general text)")
     parser.add_argument("--load_in_8bit", action="store_true", help="Load model in 8-bit via bitsandbytes (for 8B on 16GB T4)")
     parser.add_argument("--load_in_4bit", action="store_true", help="Load model in 4-bit NF4")
     parser.add_argument("--output_dir", type=str, default="experiments/results", help="Directory for outputs")
@@ -407,6 +500,7 @@ def main():
     print("SPARSE AI: TOPOLOGICAL NIAH RETRIEVAL SWEEP BENCHMARK")
     print(f"Model: {args.model_id} | Device: {args.device}")
     print(f"Context: {args.context_len} | Needle Positions: {args.num_positions}")
+    print(f"Router Init Mode: '{args.init_mode}' | Warmup: {'Skipped (Frozen)' if args.skip_warmup else args.warmup_dataset}")
     if args.load_in_8bit:
         print("Quantization: 8-bit (bitsandbytes)")
     elif args.load_in_4bit:
@@ -442,15 +536,19 @@ def main():
     )
     
     # 3. Inject Dynamic Topology Router
-    print("\n[2/4] Injecting Dynamic Topology Router (LLaMA Surgery)...")
-    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True)
+    print(f"\n[2/4] Injecting Dynamic Topology Router (LLaMA Surgery, init_mode='{args.init_mode}')...")
+    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True, init_mode=args.init_mode)
     
     # 4. Router Warmup
     if not args.skip_warmup:
-        print("\n[3/4] Warming up router on NIAH task distribution...")
-        warmup_router_niah(model, tokenizer, steps=args.train_steps, device=args.device)
+        if args.warmup_dataset == "wikitext":
+            print("\n[3/4] Warming up router on unsupervised WikiText / natural language text (Zero NIAH Training)...")
+            warmup_router_wikitext(model, tokenizer, steps=args.train_steps, device=args.device)
+        else:
+            print("\n[3/4] Warming up router on NIAH task distribution...")
+            warmup_router_niah(model, tokenizer, steps=args.train_steps, device=args.device)
     else:
-        print("\n[3/4] Skipping router warmup as requested.")
+        print(f"\n[3/4] Skipping router warmup (Frozen Router, init_mode='{args.init_mode}').")
         
     # 5. Run Sweep
     print("\n[4/4] Executing parameter sweep across depths r in [0, 1, 2, 3, 4, 5]...")

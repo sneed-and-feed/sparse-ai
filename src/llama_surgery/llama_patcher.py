@@ -9,6 +9,7 @@ def patch_llama_model(
     preserve_sinks: bool = True,
     req_depth: int = None,
     max_dist: int = None,
+    init_mode: str = "collapse",
     **kwargs
 ):
     """
@@ -19,6 +20,7 @@ def patch_llama_model(
     setattr(model.config, "surgical_tree_depth", tree_depth)
     setattr(model.config, "surgical_tau_init", tau_init)
     setattr(model.config, "preserve_sinks", preserve_sinks)
+    setattr(model.config, "surgical_init_mode", init_mode)
     if req_depth is not None:
         setattr(model.config, "surgical_req_depth", req_depth)
     if max_dist is not None:

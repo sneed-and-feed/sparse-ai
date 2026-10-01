@@ -142,11 +142,13 @@ class SurgicalLlamaAttention(nn.Module):
         self.rope = RotaryPositionEmbedding(self.head_dim, max_pos_embeddings)
         self.attn_dropout = nn.Dropout(getattr(config, "attention_dropout", 0.0))
         
+        init_mode = getattr(config, "surgical_init_mode", "collapse")
         self.router = DynamicTopologyRouter(
             embed_dim=self.embed_dim,
             seq_len=max_pos_embeddings,
             num_heads=self.num_heads,
-            p=self.p
+            p=self.p,
+            init_mode=init_mode
         )
 
     def forward(

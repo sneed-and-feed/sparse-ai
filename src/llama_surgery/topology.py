@@ -42,6 +42,7 @@ class DynamicTopologyRouter(nn.Module):
         p: int = 2,
         tau: float = 1.0,
         hard: bool = True,
+        init_mode: str = "collapse",
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -49,22 +50,30 @@ class DynamicTopologyRouter(nn.Module):
         self.p = p
         self.tau = tau
         self.hard = hard
+        self.init_mode = init_mode
         self.levels = int(math.ceil(math.log(max(seq_len, 2), p)))
 
         # Per-head routing: shared backbone, per-head projection heads
         self.backbone = nn.Linear(embed_dim, embed_dim)
         self.route_heads = nn.Linear(embed_dim, num_heads * self.levels * p)
 
-        # Deterministic Collapse Initialization for Continuous Logit Homotopy
         with torch.no_grad():
-            nn.init.zeros_(self.route_heads.weight)
-            # Initialize bias such that Child 0 has logit +5.0, others have -5.0
-            b = torch.full((self.num_heads * self.levels * self.p,), -5.0)
-            for h in range(self.num_heads):
-                for l in range(self.levels):
-                    idx = (h * self.levels * self.p) + (l * self.p) + 0
-                    b[idx] = 5.0
-            self.route_heads.bias.copy_(b)
+            if init_mode == "random":
+                # Pure random projection: tests if pre-trained representation geometry alone partitions tokens
+                nn.init.normal_(self.backbone.weight, std=0.02)
+                nn.init.zeros_(self.backbone.bias)
+                nn.init.normal_(self.route_heads.weight, std=0.02)
+                nn.init.zeros_(self.route_heads.bias)
+            else:
+                # Deterministic Collapse Initialization for Continuous Logit Homotopy
+                nn.init.zeros_(self.route_heads.weight)
+                # Initialize bias such that Child 0 has logit +5.0, others have -5.0
+                b = torch.full((self.num_heads * self.levels * self.p,), -5.0)
+                for h in range(self.num_heads):
+                    for l in range(self.levels):
+                        idx = (h * self.levels * self.p) + (l * self.p) + 0
+                        b[idx] = 5.0
+                self.route_heads.bias.copy_(b)
 
     def forward(
         self, x: torch.Tensor, tau_override: Optional[float] = None
