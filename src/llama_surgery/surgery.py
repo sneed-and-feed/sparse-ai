@@ -252,6 +252,58 @@ class SurgicalLlamaAttention(nn.Module):
         local_window = getattr(self.config, "surgical_local_window", 16)
         levels = assignments.shape[-2]
         surgical_req_depth = getattr(self.config, "surgical_req_depth", None)
+
+        # FAST INFERENCE PATH (Zero memory churn, O(1) integer prefix comparison)
+        is_inference = (not self.training) or (not torch.is_grad_enabled())
+        if is_inference:
+            if surgical_req_depth == 0:
+                # r = 0: Dense baseline (no sparse masking)
+                attn_weights = F.softmax(scores, dim=-1, dtype=torch.float32)
+                attn_weights = torch.nan_to_num(attn_weights, 0.0)
+                attn_weights = attn_weights.to(v.dtype)
+                attn_weights = self.attn_dropout(attn_weights)
+                out = torch.matmul(attn_weights, v)
+                out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+                return self.o_proj(out), attn_weights
+
+            # r > 0: Direct discrete prefix equality
+            r = min(surgical_req_depth if surgical_req_depth is not None else (levels // 2), levels)
+            indices = assignments.argmax(dim=-1)[..., :r]  # (B, H, S_total, r)
+            powers = (self.p ** torch.arange(r, device=indices.device))
+            branch_id = (indices * powers).sum(dim=-1)      # (B, H, S_total)
+
+            if seq_len == 1 and L > 1:
+                curr_branch = branch_id[:, :, -1:].unsqueeze(-1)    # (B, H, 1, 1)
+                past_branches = branch_id[:, :, :L].unsqueeze(-2)  # (B, H, 1, L)
+                um_mask_bool = (curr_branch == past_branches)      # (B, H, 1, L)
+                if local_window > 0:
+                    um_mask_bool[..., :, max(0, L - local_window):] = True
+            else:
+                curr_b = branch_id[:, :, :seq_len]                 # (B, H, seq_len)
+                past_b = branch_id[:, :, :L]                       # (B, H, L)
+                um_mask_bool = (curr_b.unsqueeze(-1) == past_b.unsqueeze(-2)) # (B, H, seq_len, L)
+                if local_window > 0:
+                    idx_q = torch.arange(seq_len, device=hidden_states.device)
+                    idx_k = torch.arange(L, device=hidden_states.device)
+                    band = torch.abs(idx_q.unsqueeze(1) - idx_k.unsqueeze(0)) <= local_window
+                    um_mask_bool = um_mask_bool | band.unsqueeze(0).unsqueeze(0)
+
+            # Attention Sink (Token 0)
+            um_mask_bool[..., :, 0] = True
+
+            sparse_scores = scores.masked_fill(~um_mask_bool, float('-inf'))
+            is_all_neg_inf = (sparse_scores == float('-inf')).all(dim=-1, keepdim=True)
+            sparse_scores = sparse_scores.masked_fill(is_all_neg_inf, 0.0)
+
+            attn_weights = F.softmax(sparse_scores, dim=-1, dtype=torch.float32)
+            attn_weights = torch.nan_to_num(attn_weights, 0.0)
+            attn_weights = attn_weights.to(v.dtype)
+            attn_weights = self.attn_dropout(attn_weights)
+            out = torch.matmul(attn_weights, v)
+            out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+            return self.o_proj(out), attn_weights
+
+        # TRAINING PATH (Differentiable Straight-Through Estimator)
         max_dist = getattr(
             self.config,
             "surgical_max_dist",
@@ -276,9 +328,7 @@ class SurgicalLlamaAttention(nn.Module):
         attn_weights = F.softmax(sparse_scores, dim=-1, dtype=torch.float32)
         attn_weights = torch.nan_to_num(attn_weights, 0.0)
 
-        # CRITICAL FIX: Multiply by the differentiable soft mask!
-        # The boolean mask blocked gradients to the router. By multiplying by the STE full_mask,
-        # the language modeling loss can successfully backpropagate into the routing assignments!
+        # Multiply by the differentiable soft mask for training
         attn_weights = attn_weights * full_mask
         attn_weights = attn_weights / (attn_weights.sum(dim=-1, keepdim=True) + 1e-8)
 
