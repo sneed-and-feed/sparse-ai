@@ -43,6 +43,7 @@ if HAS_TRITON:
         stride_lz, stride_lh, stride_lm,
         Z, H, N_CTX,
         BLOCK_M: tl.constexpr, BLOCK_DMODEL: tl.constexpr, BLOCK_N: tl.constexpr,
+        IS_CAUSAL: tl.constexpr = False,
     ):
         start_m = tl.program_id(0)
         off_hz = tl.program_id(1)
@@ -72,6 +73,7 @@ if HAS_TRITON:
         acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
         num_act = tl.load(num_active_k + act_offset)
+        offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
 
         for idx in range(max_active_k):
             mask = idx < num_act
@@ -93,6 +95,14 @@ if HAS_TRITON:
             qk = tl.dot(q, k) * sm_scale
             qk = tl.where(mask, qk, float('-inf'))
 
+            if IS_CAUSAL:
+                if start_n_block == start_m:
+                    offs_n = start_n_block * BLOCK_N + tl.arange(0, BLOCK_N)
+                    causal_mask = offs_m[:, None] >= offs_n[None, :]
+                    qk = tl.where(causal_mask, qk, float('-inf'))
+                elif start_n_block > start_m:
+                    qk = float('-inf')
+
             m_i_new = tl.maximum(m_i, tl.max(qk, 1))
             alpha = tl.exp(m_i - m_i_new)
             p = tl.exp(qk - m_i_new[:, None])
@@ -106,12 +116,11 @@ if HAS_TRITON:
 
         L_i = m_i + tl.math.log(l_i)
         l_offset = off_z * stride_lz + off_h * stride_lh
-        offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
         l_ptrs = L + l_offset + offs_m
         tl.store(l_ptrs, L_i, mask=offs_m < N_CTX)
 
 
-def compute_block_sparse_indices(router_indices: torch.Tensor, req_depth: int):
+def compute_block_sparse_indices(router_indices: torch.Tensor, req_depth: int, is_causal: bool = False):
     """
     Computes precomputed active block coordinate lists for the Triton kernels.
     """
@@ -121,6 +130,11 @@ def compute_block_sparse_indices(router_indices: torch.Tensor, req_depth: int):
     else:
         r = router_indices[:, :, :, :req_depth]
         match = (r.unsqueeze(3) == r.unsqueeze(2)).all(dim=-1)
+    
+    if is_causal:
+        col_indices = torch.arange(num_blocks, device=router_indices.device)
+        causal_block_mask = col_indices.unsqueeze(0) <= col_indices.unsqueeze(1)
+        match = match & causal_block_mask
     
     _, q_to_k_indices = match.sort(dim=-1, descending=True)
     num_active_k = match.sum(dim=-1, dtype=torch.int32)
@@ -363,6 +377,7 @@ def _pytorch_fallback(
     router_indices: torch.Tensor,
     req_depth: int,
     p: int = 2,
+    is_causal: bool = False,
 ) -> torch.Tensor:
     """
     Pure PyTorch fallback when Triton is unavailable.
@@ -379,13 +394,21 @@ def _pytorch_fallback(
     # Build block-level mask: blocks match if routing prefixes agree up to req_depth
     # router_indices: (Z, H, num_blocks, depth)
     r = router_indices[:, :, :, :req_depth]  # (Z, H, num_blocks, req_depth)
-    # Compare all pairs: (Z, H, num_blocks, 1, req_depth) vs (Z, H, 1, num_blocks, req_depth)
     match = (r.unsqueeze(3) == r.unsqueeze(2)).all(dim=-1)  # (Z, H, num_blocks, num_blocks)
+
+    if is_causal:
+        col_indices = torch.arange(num_blocks, device=router_indices.device)
+        causal_block_mask = col_indices.unsqueeze(0) <= col_indices.unsqueeze(1)
+        match = match & causal_block_mask
 
     # Expand block-level mask to token-level mask
     # match[z,h,i,j] = True means tokens in block i attend to tokens in block j
     mask = match.repeat_interleave(BLOCK, dim=2).repeat_interleave(BLOCK, dim=3)
     mask = mask[:, :, :N_CTX, :N_CTX]  # trim padding
+
+    if is_causal:
+        causal_mask = torch.tril(torch.ones(N_CTX, N_CTX, device=q.device, dtype=torch.bool))
+        mask = mask & causal_mask
 
     scale = 1.0 / math.sqrt(DMODEL)
     scores = torch.matmul(q, k.transpose(-2, -1)) * scale
@@ -401,6 +424,7 @@ def ultrametric_attention_triton(
     router_indices: torch.Tensor,
     req_depth: int = 2,
     p: int = 2,
+    is_causal: bool = False,
 ) -> torch.Tensor:
     """
     Launch wrapper for the Triton block-sparse ultrametric attention kernel.
@@ -420,12 +444,13 @@ def ultrametric_attention_triton(
             Higher = sparser attention (more blocks skipped).
             0 = all blocks attend (equivalent to dense). Must be <= tree_depth.
         p: tree arity (default: 2 for binary Bruhat-Tits tree)
+        is_causal: whether to apply lower-triangular causal masking (for autoregressive LLMs)
 
     Returns:
         out: (batch, heads, seq_len, head_dim) float16 attention output
     """
     if not HAS_TRITON:
-        return _pytorch_fallback(q, k, v, router_indices, req_depth, p)
+        return _pytorch_fallback(q, k, v, router_indices, req_depth, p, is_causal=is_causal)
 
     assert q.dtype == torch.float16, f"Triton kernel requires float16, got {q.dtype}"
     assert q.is_cuda, "Triton kernel requires CUDA tensors"
@@ -460,7 +485,9 @@ def ultrametric_attention_triton(
         router_indices = torch.cat([router_indices, pad], dim=2)
 
     # Precompute coordinate lists
-    q_to_k_indices, num_active_k, max_active_k, _, _, _ = compute_block_sparse_indices(router_indices, req_depth)
+    q_to_k_indices, num_active_k, max_active_k, _, _, _ = compute_block_sparse_indices(
+        router_indices, req_depth, is_causal=is_causal
+    )
 
     # Allocate output
     out = torch.empty_like(q)
@@ -484,9 +511,14 @@ def ultrametric_attention_triton(
         L.stride(0), L.stride(1), L.stride(2),
         Z, H, N_CTX,
         BLOCK_M=BLOCK_M, BLOCK_DMODEL=BLOCK_DMODEL, BLOCK_N=BLOCK_N,
+        IS_CAUSAL=is_causal,
     )
 
     return out, L
+
+
+# Canonical alias for quickstart API
+block_sparse_attention = ultrametric_attention_triton
 
 
 class CurriculumSparseAttention(torch.autograd.Function):

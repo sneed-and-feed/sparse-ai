@@ -21,11 +21,12 @@ from .model import (
     UltrametricTransformerBlock,
     UltrametricTransformer,
 )
-from .kernel import HAS_TRITON, routing_to_block_indices
-
-# Conditional export for Triton
-if HAS_TRITON:
-    from .kernel import ultrametric_attention_triton
+from .kernel import (
+    HAS_TRITON,
+    routing_to_block_indices,
+    ultrametric_attention_triton,
+    block_sparse_attention,
+)
 
 __all__ = [
     # Topology & Routing
@@ -44,4 +45,6 @@ __all__ = [
     # Kernel utilities
     "HAS_TRITON",
     "routing_to_block_indices",
+    "ultrametric_attention_triton",
+    "block_sparse_attention",
 ]

@@ -6,12 +6,14 @@ import sys
 import unittest
 from pathlib import Path
 
-# Add src to path
-src_dir = Path(__file__).resolve().parent.parent / "src"
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
+# Add project root and src to path
+proj_root = Path(__file__).resolve().parent.parent
+src_dir = proj_root / "src"
+for p in [str(proj_root), str(src_dir)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-from adelic_spectral_zeta.circuits.padic_r1cs import (
+from circuits.padic_r1cs import (
     BN254_R,
     BLS12_381_R,
     GOLDILOCKS_P,

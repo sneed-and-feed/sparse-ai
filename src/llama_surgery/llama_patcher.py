@@ -1,11 +1,23 @@
 import torch.nn as nn
 from .surgery import SurgicalLlamaAttention
 
-def inject_surgery(model):
+def patch_llama_model(
+    model,
+    tree_depth: int = 4,
+    arity: int = 2,
+    tau_init: float = 1.0,
+    preserve_sinks: bool = True,
+    **kwargs
+):
     """
-    Iterates over model.model.layers, replaces self_attn with SurgicalLlamaAttention,
-    and copies over the pre-trained q_proj, k_proj, v_proj, o_proj weights.
+    Surgically injects Dynamic Topology Routers into a pre-trained LLaMA model,
+    replacing self_attn layers with SurgicalLlamaAttention and transferring pre-trained weights.
     """
+    setattr(model.config, "surgical_p", arity)
+    setattr(model.config, "surgical_tree_depth", tree_depth)
+    setattr(model.config, "surgical_tau_init", tau_init)
+    setattr(model.config, "preserve_sinks", preserve_sinks)
+
     for i, layer in enumerate(model.model.layers):
         old_attn = layer.self_attn
         
@@ -35,3 +47,10 @@ def inject_surgery(model):
         layer.self_attn = new_attn
     
     return model
+
+def inject_surgery(model, **kwargs):
+    """
+    Iterates over model.model.layers, replaces self_attn with SurgicalLlamaAttention,
+    and copies over the pre-trained q_proj, k_proj, v_proj, o_proj weights.
+    """
+    return patch_llama_model(model, **kwargs)

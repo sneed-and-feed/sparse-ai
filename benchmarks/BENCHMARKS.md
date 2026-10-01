@@ -1,15 +1,15 @@
-# Adèlic Spectral Geometry: Empirical Benchmarks
+# Sparse AI: Empirical Benchmarks
 
-This document details the empirical benchmarks of the **Ultrametric AI / Adèlic Topology Router** architecture. It covers both the raw hardware speedups achieved via our custom Triton kernels, and the qualitative logic tests (like the Dyck-2 language) that prove the model is learning genuine geometric topology.
+This document details the empirical benchmarks of the **Sparse AI / Dynamic Ultrametric Attention** architecture. It covers both the hardware speedups achieved via custom Triton kernels against un-fused attention baselines, and qualitative structural benchmarks (such as the Dyck-2 formal grammar) verifying autonomous tree discovery.
 
 ## 1. Hardware & Latency Benchmarks (Triton)
 
-By replacing the dense $O(N^2)$ self-attention matrix with a hierarchical $O(N \log N)$ block-sparse mask derived from the $p$-adic metric, we achieved massive latency and memory improvements on A100 GPUs:
+By replacing the un-fused $O(N^2)$ self-attention matrix with a hierarchical $O(N \log N)$ block-sparse mask derived from the $p$-adic metric, the custom Triton kernel skips non-attending SRAM tile loads during forward attention:
 
-* **28× Inference Speedup:** At 8192 tokens, the Triton block-sparse forward kernel executes 28 times faster than standard dense attention.
-* **98.4% Memory Reduction:** The block-sparse mask avoids allocating massive dense `(seq_len, seq_len)` activation matrices.
-* **11.59× Wall-Clock Speedup (End-to-End):** At 2048 tokens, using autonomously learned per-head routing gates (no hand-designed sparsity), the total step latency drops by over a factor of 10.
-* **8× Effective Memory Bandwidth:** During autoregressive decoding, our sparse PagedAttention kernel conditionally skips HBM loads for non-matching KV-cache blocks, directly accelerating the memory-bound decoding phase.
+* **28× Inference Speedup over Naive PyTorch:** At 8,192 tokens, the Triton block-sparse forward kernel executes 28× faster than standard un-fused PyTorch attention (`Q @ K.T -> softmax -> @ V` materializing the full $N^2$ activation matrix). Note: This speedup is measured against the naive un-fused PyTorch attention baseline; FlashAttention fuses the operation without block skipping.
+* **98.4% Theoretical Activation Sparsity:** At maximum depth ($r=6$, $p=2$), the block-sparse mask skips $1 - 2^{-6} = 63/64$ (98.4375%) of off-diagonal block allocations, as formally proved in [`PrefixSparsity.lean`](../formalization/Formalization/Combinatorics/PrefixSparsity.lean).
+* **11.59× Wall-Clock Speedup (End-to-End):** At 2,048 tokens, using autonomously learned per-head routing gates (no hand-designed sparsity), the total step latency drops by over a factor of 10 against the un-fused baseline.
+* **8× Effective Memory Bandwidth:** During autoregressive decoding, the sparse PagedAttention kernel conditionally skips HBM loads for non-matching KV-cache blocks, accelerating memory-bound decoding.
 * **Why PyTorch/JAX fail:** Native PyTorch block iteration achieves the memory savings but is 83× *slower* than dense attention due to Python loop overhead. JAX/XLA static compilation crashes the NVIDIA PTX assembler when attempting to compile dynamic block-sparse routing logic. Only the custom Triton kernel achieves both memory savings and speed gains.
 
 ---

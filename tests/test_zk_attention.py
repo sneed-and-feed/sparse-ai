@@ -35,7 +35,7 @@ for p in [str(_PROJ_ROOT), str(_SRC_DIR), str(_TOOLS_DIR)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from adelic_spectral_zeta.circuits.padic_r1cs import (
+from circuits.padic_r1cs import (
     BN254_R,
     PAdicLCAConstraintBuilder,
     R1CSSystem,

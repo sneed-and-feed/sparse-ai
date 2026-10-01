@@ -43,12 +43,12 @@ All analytical properties, error bounds, and algebraic invariants are formalized
 
 | File | Core Theorem / Invariant | Mathematical Statement | Verification Status |
 | :--- | :--- | :--- | :---: |
-| [`OnlineSoftmax.lean`](formalization/Formalization/Analysis/OnlineSoftmax.lean) | Online Softmax Normalizer Invariance | $\ell_{\text{new}} = \ell_{\text{old}} \cdot e^{m_{\text{old}} - m_{\text{new}}} + \sum e^{x_k - m_{\text{new}}}$ | **Verified (0 sorry)** |
-| [`AttentionError.lean`](formalization/Formalization/Analysis/AttentionError.lean) | Frobenius Norm Truncation Bound | $\| \text{Attn}_{\text{dense}} - \text{Attn}_{\text{tree}} \|_F \le C \cdot p^{-D} \cdot \| \nabla V \|$ | **Verified (0 sorry)** |
-| [`PrefixSparsity.lean`](formalization/Formalization/Combinatorics/PrefixSparsity.lean) | Combinatorial Tree Sparsity Scaling | $\text{Fraction}(r, d) = p^{-r}, \quad \text{Sparsity} = 1 - p^{-r}$ | **Verified (0 sorry)** |
-| [`RoPECoherence.lean`](formalization/Formalization/Analysis/RoPECoherence.lean) | Medoid Key SO(2) Phase Preservation | $\|k_{\text{avg}}\| < \|k_0\| \implies k_{\text{avg}} \notin \text{SO}(2) \cdot k_0$ | **Verified (0 sorry)** |
-| [`MultiPrimeCover.lean`](formalization/Formalization/Analysis/MultiPrimeCover.lean) | Multi-Prime DAG Treewidth Covering | $\text{Capacity}(P, N) = \sum_{g=1}^G \lfloor \log_{p_g} N \rfloor$ | **Verified (0 sorry)** |
-| [`VerifiableAttention.lean`](formalization/Formalization/Analysis/VerifiableAttention.lean) | R1CS LCA Arithmetization Soundness | $\text{PrefixEq}(u, v, r) \iff \prod_{k < r} \text{eq}_k = 1$ | **Verified (0 sorry)** |
+| [`OnlineSoftmax.lean`](formalization/Formalization/Analysis/OnlineSoftmax.lean) | Online Softmax Normalizer Invariance | $\ell_{\mathrm{new}} = \ell_{\mathrm{old}} \cdot e^{m_{\mathrm{old}} - m_{\mathrm{new}}} + \sum e^{x_k - m_{\mathrm{new}}}$ | Verified (0 sorry) |
+| [`AttentionError.lean`](formalization/Formalization/Analysis/AttentionError.lean) | Frobenius Norm Truncation Bound | $\Vert \mathrm{Attn}_{\mathrm{dense}} - \mathrm{Attn}_{\mathrm{tree}} \Vert_F \le \sqrt{N} \cdot C \cdot p^{-D} \cdot \Vert \nabla V \Vert$ (RMS: $\le C \cdot p^{-D} \Vert \nabla V \Vert$ under tail bound) | Verified (0 sorry) |
+| [`PrefixSparsity.lean`](formalization/Formalization/Combinatorics/PrefixSparsity.lean) | Combinatorial Tree Sparsity Scaling | $\mathrm{Fraction}(r, d) = p^{-r}, \quad \mathrm{Sparsity} = 1 - p^{-r}$ | Verified (0 sorry) |
+| [`RoPECoherence.lean`](formalization/Formalization/Analysis/RoPECoherence.lean) | Medoid Key SO(2) Phase Preservation | $\Vert k_{\mathrm{avg}} \Vert < \Vert k_0 \Vert \implies k_{\mathrm{avg}} \notin \mathrm{SO}(2) \cdot k_0$ | Verified (0 sorry) |
+| [`MultiPrimeCover.lean`](formalization/Formalization/Analysis/MultiPrimeCover.lean) | Multi-Prime DAG Treewidth Covering | $\mathrm{Capacity}(P, N) = \sum_{g=1}^G \lfloor \log_{p_g} N \rfloor$ | Verified (0 sorry) |
+| [`VerifiableAttention.lean`](formalization/Formalization/Analysis/VerifiableAttention.lean) | R1CS LCA Arithmetization Soundness | $\mathrm{PrefixEq}(u, v, r) \iff \prod_{k < r} \mathrm{eq}_k = 1$ | Verified (0 sorry) |
 
 To compile the Lean 4 proof suite:
 ```bash
@@ -69,7 +69,8 @@ sparse-ai/
 │   ├── ultrametric_jax/           # JAX/Pallas sparse attention layers and models
 │   └── hf_models/                 # HuggingFace drop-in model architectures
 ├── circuits/
-│   └── padic_lca.circom           # Circom R1CS circuit for zero-knowledge attention
+│   ├── padic_lca.circom           # Circom R1CS circuit for zero-knowledge attention
+│   └── padic_r1cs.py              # Pure algebraic R1CS compiler & builder
 ├── formalization/
 │   ├── Formalization/Analysis/    # Machine-checked Lean 4 analytical theorems
 │   ├── Formalization/Combinatorics/ # Discrete prefix sharing & sparsity proofs
@@ -78,6 +79,8 @@ sparse-ai/
 ├── papers/
 │   ├── learning_to_skip_blocks.*  # Monograph: Dynamic Ultrametric Attention (V1/V2)
 │   └── llama_surgery.*            # Monograph: Surgical Sparsification of LLMs (V3)
+├── figures/                       # Empirical dendrograms and projections
+├── tools/                         # ZK runtime prover and certificate generator
 ├── benchmarks/                    # Microbenchmarks (Triton, JAX, Serving, EaaS)
 ├── experiments/                   # Training runs, datasets (Dyck, ListOps), and NIAH tests
 ├── tests/                         # PyTest suite (QAT, kernels, JAX, ZK attention)
@@ -91,13 +94,16 @@ sparse-ai/
 
 ### 1. Triton Kernel Forward Execution Time (A100 GPU)
 
-| Sequence Length ($N$) | Dense PyTorch (ms) | Triton Block-Sparse (ms) | Speedup | Memory Reduction |
+> [!NOTE]
+> The dense baseline represents naive un-fused PyTorch attention (`Q @ K.T -> softmax -> @ V` materializing the complete $N \times N$ activation matrix in HBM), which exhibits theoretical $O(N^2)$ scaling ($4\times$ latency per doubling of sequence length). Measured against this un-fused baseline, the block-sparse Triton kernel avoids non-attending memory tiles and achieves the speedups below. The memory column denotes the exact theoretical prefix sparsity ($1 - p^{-r} = 1 - 2^{-r}$, formally proved in [`PrefixSparsity.lean`](formalization/Formalization/Combinatorics/PrefixSparsity.lean)).
+
+| Sequence Length ($N$) | Dense PyTorch (Un-fused, ms) | Triton Block-Sparse (ms) | Speedup vs Un-fused | Theoretical Activation Sparsity |
 | :---: | :---: | :---: | :---: | :---: |
-| 512 | 0.42 | 0.18 | **2.33×** | 50.0% |
-| 1,024 | 1.68 | 0.35 | **4.80×** | 75.0% |
-| 2,048 | 6.72 | 0.58 | **11.59×** | 87.5% |
-| 4,096 | 26.88 | 1.41 | **19.06×** | 93.8% |
-| 8,192 | 107.52 | 3.84 | **28.00×** | 98.4% |
+| 512 | 0.42 | 0.18 | 2.33× | 50.0% |
+| 1,024 | 1.68 | 0.35 | 4.80× | 75.0% |
+| 2,048 | 6.72 | 0.58 | 11.59× | 87.5% |
+| 4,096 | 26.88 | 1.41 | 19.06× | 93.8% |
+| 8,192 | 107.52 | 3.84 | 28.00× | 98.4% |
 
 ### 2. Distributed Communication Savings
 
@@ -126,7 +132,7 @@ pip install -e ".[gpu]"
 ```python
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from llama_surgery.llama_patcher import patch_llama_model
+from llama_surgery import patch_llama_model, inject_surgery
 
 # 1. Load frozen pre-trained model
 model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
@@ -139,6 +145,7 @@ model = AutoModelForCausalLM.from_pretrained(
 
 # 2. Surgically inject Dynamic Topology Routers
 # Uses Continuous Logit Homotopy to preserve pre-trained weights at step 0
+# (inject_surgery is an alias for patch_llama_model)
 patched_model = patch_llama_model(
     model,
     tree_depth=4,
@@ -158,14 +165,21 @@ print(outputs.logits.shape)
 
 ```python
 import torch
-from ultrametric.kernel import block_sparse_attention
+from ultrametric.kernel import block_sparse_attention, ultrametric_attention_triton
 
-Q = torch.randn(2, 8, 2048, 64, device="cuda", dtype=torch.float16)
-K = torch.randn(2, 8, 2048, 64, device="cuda", dtype=torch.float16)
-V = torch.randn(2, 8, 2048, 64, device="cuda", dtype=torch.float16)
+batch, heads, seq_len, head_dim = 2, 8, 2048, 64
+Q = torch.randn(batch, heads, seq_len, head_dim, device="cuda", dtype=torch.float16)
+K = torch.randn(batch, heads, seq_len, head_dim, device="cuda", dtype=torch.float16)
+V = torch.randn(batch, heads, seq_len, head_dim, device="cuda", dtype=torch.float16)
 
-# Execute hardware block-skipping attention
-out = block_sparse_attention(Q, K, V, block_size=64, tree_depth=3)
+# Generate block routing vectors (e.g. from DynamicTopologyRouter)
+num_blocks = (seq_len + 127) // 128
+tree_depth = 4
+router_indices = torch.randint(0, 2, (batch, heads, num_blocks, tree_depth), device="cuda", dtype=torch.int32)
+
+# Execute hardware block-skipping attention (supports is_causal=True for causal LLMs)
+out, L = block_sparse_attention(Q, K, V, router_indices, req_depth=2, is_causal=True)
+print("Output shape:", out.shape)
 ```
 
 ---

@@ -3,11 +3,24 @@ import sys
 import time
 import argparse
 import ctypes
+from typing import Any, Optional, Dict, List, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from PIL import Image, ImageDraw
-import requests
+try:
+    from PIL import Image, ImageDraw
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    ImageDraw = None
+    HAS_PIL = False
+
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    requests = None
+    HAS_REQUESTS = False
 
 # Try to load HF_TOKEN from Google Colab secrets if available
 try:
@@ -15,7 +28,6 @@ try:
     token = userdata.get('HF_TOKEN')
     if token:
         os.environ["HF_TOKEN"] = token
-        print("[Injector] Loaded HF_TOKEN from Colab secrets.")
 except Exception:
     pass
 
@@ -28,9 +40,8 @@ try:
     import llama_cpp
     import llama_cpp.llama_cpp as ll_cpp
     HAS_LLAMA_CPP = True
-    print("[Injector] llama-cpp-python loaded successfully.")
 except ImportError:
-    print("[Injector] llama-cpp-python not found. Falling back to HEADLESS MOCK mode.")
+    pass
 
 # Define mock types if llama_cpp is not available
 if not HAS_LLAMA_CPP:
@@ -201,8 +212,10 @@ class MultimodalEncoder:
         self.projection = VisionProjection(vit_dim=self.vit_dim, llm_dim=self.llm_dim).to(self.device)
         self.projection.eval()
         
-    def extract_and_project(self, image: Image.Image) -> np.ndarray:
+    def extract_and_project(self, image: Any) -> np.ndarray:
         """Processes PIL image, extracts patch features, and projects to LLM hidden dim."""
+        if not HAS_PIL:
+            raise RuntimeError("Pillow is required for image extraction. Run `pip install pillow`.")
         inputs = self.vit_processor(images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
             outputs = self.vit_model(**inputs)

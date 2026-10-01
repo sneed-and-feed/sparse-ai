@@ -71,8 +71,8 @@ lemma online_softmax_equivalence_general (rows : List (List ℝ)) (prev_elements
     simp
 
 /--
-Agent 2: Online Softmax Equivalence 
-Formalize in Lean 4: The online softmax recurrence (m_new = max(m_old, max(row)), alpha = exp(m_old - m_new), l = l*alpha + sum(exp(x - m_new))) produces identical output to standard two-pass softmax (compute max, subtract, exp, normalize). This is the Milakov-Gimelshein 2018 result. Pure real arithmetic, no topology.
+The online softmax recurrence produces identical output to standard two-pass softmax:
+the accumulated denominator equals the shifted exponential sum of all concatenated row elements.
 -/
 theorem online_softmax_equivalence (rows : List (List ℝ)) (init_m : ℝ) :
   (rows.foldl online_step (init_m, sum_exp_shifted [] init_m)).2 =

@@ -109,8 +109,8 @@ def sparsity (d p r : ℕ) (h : r ≤ d) : ℚ :=
   1 - shared_fraction d p r h
 
 /--
-Agent 1: Sparsity Bound
-Formalize in Lean 4: For a p-ary tree of depth d, the fraction of block pairs that share a common ancestor at depth r is exactly p^(-r). Therefore sparsity = 1 - p^(-r). Prove for p=2: req_depth=1 → 50%, req_depth=3 → 87.5%, req_depth=6 → 98.4%. This is finite combinatorics over tree paths — induction on d.
+For a $p$-ary tree of depth $d$, the fraction of block pairs sharing a common ancestor
+at depth $r$ is $p^{-r}$, yielding exact sparsity $1 - 1/p^r$.
 -/
 theorem sparsity_bound (d p r : ℕ) (hp : p > 0) (h : r ≤ d) :
     sparsity d p r h = 1 - (1 : ℚ) / (p : ℚ) ^ r := by
