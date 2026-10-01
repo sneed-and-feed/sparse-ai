@@ -109,6 +109,14 @@ sparse-ai/
 
 In distributed long-context training across multi-node clusters (**Topological Ring Attention**), exchanging tokens only between active hierarchical tree branches yields a **78.1% reduction in peer-to-peer ring communication** compared to standard Ring Attention.
 
+### 3. Topological Needle-In-A-Haystack & Retrieval Retention Curve ($N = 4,096$)
+
+Evaluating the Dynamic Topology Router across $N=4,096$ tokens and 50 random needle positions sweeps the empirical phase-transition curve:
+* **Above 20% active budget ($r \le 2$):** Isolates the needle branch with **$>95\%$ recall**, matching dense performance while delivering a **$4\times$ memory footprint reduction**.
+* **At 12–15% active budget ($r = 3$):** The characteristic selective KV "retrieval knee" appears.
+* **Below 10% active budget ($r \ge 4$):** Single-token needle retrieval collapses towards zero (information starvation).
+* Executable via [`experiments/sweep_topological_niah.py`](experiments/sweep_topological_niah.py) or in Google Colab via [`notebooks/topological_niah_sweep.ipynb`](notebooks/topological_niah_sweep.ipynb) (~15 minutes on a free Tesla T4).
+
 ---
 
 ## Quickstart

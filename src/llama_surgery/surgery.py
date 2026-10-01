@@ -225,10 +225,11 @@ class SurgicalLlamaAttention(nn.Module):
         v = repeat_kv(v, self.num_key_value_groups)
 
         use_triton = getattr(self.config, "use_triton_sparse_attention", False)
+        req_depth = getattr(self.config, "surgical_req_depth", 2)
         if use_triton and seq_len > 1 and q.dtype == torch.float16 and not q.requires_grad:
             from .kernel import routing_to_block_indices, ultrametric_attention_triton
             router_indices = routing_to_block_indices(assignments, seq_len=seq_len, block_size=128)
-            out = ultrametric_attention_triton(q, k, v, router_indices, local_window=128, req_depth=2, p=self.p)
+            out = ultrametric_attention_triton(q, k, v, router_indices, local_window=128, req_depth=req_depth, p=self.p)
             out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
             out = self.o_proj(out)
             return out, None
@@ -249,7 +250,16 @@ class SurgicalLlamaAttention(nn.Module):
         # Dynamic Sparsification
         L = k.shape[-2]
         local_window = getattr(self.config, "surgical_local_window", 16)
-        full_mask = get_dynamic_ultrametric_mask(assignments, p=self.p, local_window=local_window).to(hidden_states.device)
+        levels = assignments.shape[-2]
+        surgical_req_depth = getattr(self.config, "surgical_req_depth", None)
+        max_dist = getattr(
+            self.config,
+            "surgical_max_dist",
+            (levels - surgical_req_depth) if surgical_req_depth is not None else None
+        )
+        full_mask = get_dynamic_ultrametric_mask(
+            assignments, p=self.p, max_dist=max_dist, local_window=local_window
+        ).to(hidden_states.device)
         um_mask_bool = full_mask > 0.5  # Shape: (B, H, S_full, L) or (B, H, L, L)
         
         if seq_len == 1 and L > 1:

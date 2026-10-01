@@ -7,6 +7,8 @@ def patch_llama_model(
     arity: int = 2,
     tau_init: float = 1.0,
     preserve_sinks: bool = True,
+    req_depth: int = None,
+    max_dist: int = None,
     **kwargs
 ):
     """
@@ -17,6 +19,10 @@ def patch_llama_model(
     setattr(model.config, "surgical_tree_depth", tree_depth)
     setattr(model.config, "surgical_tau_init", tau_init)
     setattr(model.config, "preserve_sinks", preserve_sinks)
+    if req_depth is not None:
+        setattr(model.config, "surgical_req_depth", req_depth)
+    if max_dist is not None:
+        setattr(model.config, "surgical_max_dist", max_dist)
 
     for i, layer in enumerate(model.model.layers):
         old_attn = layer.self_attn
