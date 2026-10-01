@@ -377,11 +377,13 @@ def plot_retrieval_heatmap(results: Dict[str, Any], output_path: str = "figures/
 
 def main():
     parser = argparse.ArgumentParser(description="Run Topological NIAH Parameter Sweep Benchmark")
-    parser.add_argument("--model_id", type=str, default="TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+    parser.add_argument("--model_id", type=str, default="meta-llama/Meta-Llama-3.1-8B-Instruct", help="Hugging Face model ID")
     parser.add_argument("--context_len", type=int, default=4096, help="Target context length (default 4096)")
     parser.add_argument("--num_positions", type=int, default=50, help="Number of random needle positions (default 50)")
     parser.add_argument("--train_steps", type=int, default=80, help="Router warmup training steps (default 80)")
     parser.add_argument("--skip_warmup", action="store_true", help="Skip router warmup training")
+    parser.add_argument("--load_in_8bit", action="store_true", help="Load model in 8-bit via bitsandbytes (for 8B on 16GB T4)")
+    parser.add_argument("--load_in_4bit", action="store_true", help="Load model in 4-bit NF4")
     parser.add_argument("--output_dir", type=str, default="experiments/results", help="Directory for outputs")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -390,6 +392,10 @@ def main():
     print("SPARSE AI: TOPOLOGICAL NIAH RETRIEVAL SWEEP BENCHMARK")
     print(f"Model: {args.model_id} | Device: {args.device}")
     print(f"Context: {args.context_len} | Needle Positions: {args.num_positions}")
+    if args.load_in_8bit:
+        print("Quantization: 8-bit (bitsandbytes)")
+    elif args.load_in_4bit:
+        print("Quantization: 4-bit (NF4)")
     print("=" * 70)
     
     # 1. Check HF Token if in environment
@@ -403,12 +409,21 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         
-    dtype = torch.float16 if args.device == "cuda" else torch.float32
+    model_kwargs = {
+        "device_map": args.device,
+        "token": hf_token,
+    }
+    if args.load_in_8bit:
+        model_kwargs["load_in_8bit"] = True
+    elif args.load_in_4bit:
+        model_kwargs["load_in_4bit"] = True
+    else:
+        dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else (torch.float16 if args.device == "cuda" else torch.float32)
+        model_kwargs["torch_dtype"] = dtype
+        
     model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
-        torch_dtype=dtype,
-        device_map=args.device,
-        token=hf_token
+        **model_kwargs
     )
     
     # 3. Inject Dynamic Topology Router
