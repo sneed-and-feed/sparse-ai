@@ -17,6 +17,9 @@ import random
 import argparse
 from typing import List, Dict, Any, Tuple
 
+# Ensure src/ is on sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -49,21 +52,34 @@ HAYSTACK_BASE = (
     "is an exact combinatorial invariant for hardware block scheduling. "
 )
 
-NEEDLE_KEY = "The secret operative passcode is 'KRAKEN-7729'."
-QUERY_TEXT = "What is the secret operative passcode? The secret operative passcode is '"
-ANSWER_TARGET = "KRAKEN-7729"
+NEEDLE_CONFIGS = {
+    "outlier": {
+        "needle_key": "The secret operative passcode is 'KRAKEN-7729'.",
+        "query_text": "What is the secret operative passcode? The secret operative passcode is '",
+        "answer_target": "KRAKEN-7729",
+    },
+    "banal": {
+        # Low-surprisal, in-distribution words with standard feature norms matching the geometry haystack
+        "needle_key": "The primary coordinate system used for the manifold calculation is spherical coordinates.",
+        "query_text": "What is the primary coordinate system used for the manifold calculation? The primary coordinate system used for the manifold calculation is ",
+        "answer_target": "spherical coordinates",
+    },
+}
 
 
 def build_niah_context(
     tokenizer,
     target_len: int = 4096,
     needle_depth_ratio: float = 0.5,
+    needle_type: str = "outlier",
 ) -> Tuple[torch.Tensor, str, int]:
     """
     Constructs an exact-length context containing a needle at the specified depth ratio.
     """
-    needle_text = f" {NEEDLE_KEY} "
-    query_text = f"\n\n{QUERY_TEXT}"
+    cfg = NEEDLE_CONFIGS.get(needle_type, NEEDLE_CONFIGS["outlier"])
+    needle_text = f" {cfg['needle_key']} "
+    query_text = f"\n\n{cfg['query_text']}"
+    answer_target = cfg["answer_target"]
     
     needle_ids = tokenizer.encode(needle_text, add_special_tokens=False)
     query_ids = tokenizer.encode(query_text, add_special_tokens=False)
@@ -82,7 +98,7 @@ def build_niah_context(
     context_ids = full_filler[:insert_idx] + needle_ids + full_filler[insert_idx:] + query_ids
     input_ids = torch.tensor([context_ids], dtype=torch.long)
     
-    return input_ids, ANSWER_TARGET, insert_idx
+    return input_ids, answer_target, insert_idx
 
 
 # ============================================================================
@@ -95,12 +111,13 @@ def warmup_router_niah(
     steps: int = 80,
     lr: float = 2e-3,
     device: str = "cuda",
+    needle_type: str = "outlier",
 ) -> None:
     """
     Wakes up the Dynamic Topology Router to break deterministic collapse,
     training it to route query and needle tokens into aligned tree branches.
     """
-    print(f"\n[Router Warmup] Training router on NIAH tasks for {steps} steps (LR={lr})...")
+    print(f"\n[Router Warmup] Training router on NIAH tasks (type='{needle_type}') for {steps} steps (LR={lr})...")
     
     # Freeze backbone, train only routing parameters
     for name, p in model.named_parameters():
@@ -127,7 +144,7 @@ def warmup_router_niah(
     for step in pbar:
         # Train on compact contexts (384 tokens) to rapidly learn topological separation without quadratic VRAM bloat
         depth = random.uniform(0.1, 0.9)
-        input_ids, target_str, _ = build_niah_context(tokenizer, target_len=384, needle_depth_ratio=depth)
+        input_ids, target_str, _ = build_niah_context(tokenizer, target_len=384, needle_depth_ratio=depth, needle_type=needle_type)
         input_ids = input_ids.to(device)
         
         target_ids = tokenizer.encode(target_str, add_special_tokens=False)
@@ -281,9 +298,14 @@ def evaluate_retrieval_trial(
     generated_ids = outputs[0, prompt_len:]
     generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
     
-    # Check substring match or prefix match
-    clean_target = target_answer.replace("'", "").strip()
-    is_success = (clean_target in generated_text) or (clean_target.split("-")[0] in generated_text)
+    # Check substring match or prefix match (case-insensitive)
+    clean_target = target_answer.replace("'", "").strip().lower()
+    gen_lower = generated_text.lower()
+    is_success = (
+        (clean_target in gen_lower)
+        or ("-" in clean_target and clean_target.split("-")[0] in gen_lower)
+        or (" " in clean_target and clean_target.split()[0] in gen_lower)
+    )
     
     return is_success, generated_text
 
@@ -299,6 +321,7 @@ def run_topological_niah_sweep(
     num_positions: int = 50,
     depth_values: List[int] = [0, 1, 2, 3, 4, 5],
     device: str = "cuda",
+    needle_type: str = "outlier",
 ) -> Dict[str, Any]:
     """
     Runs the full parameter sweep across required matching depth r in [0..5]
@@ -311,12 +334,13 @@ def run_topological_niah_sweep(
     results = {
         "context_len": context_len,
         "num_positions": num_positions,
+        "needle_type": needle_type,
         "depth_ratios": depth_ratios,
         "sweep": {}
     }
     
     print("=" * 70)
-    print(f"STARTING TOPOLOGICAL NIAH SWEEP (N={context_len}, {num_positions} Needle Positions)")
+    print(f"STARTING TOPOLOGICAL NIAH SWEEP (N={context_len}, {num_positions} Needle Positions, Needle='{needle_type}')")
     print("=" * 70)
     
     for r in depth_values:
@@ -336,11 +360,11 @@ def run_topological_niah_sweep(
         
         for pos_idx, ratio in enumerate(tqdm(depth_ratios, desc=f"Sweep r={r}")):
             input_ids, target_str, insert_idx = build_niah_context(
-                tokenizer, target_len=context_len, needle_depth_ratio=ratio
+                tokenizer, target_len=context_len, needle_depth_ratio=ratio, needle_type=needle_type
             )
             
             passed, gen_text = evaluate_retrieval_trial(
-                model, tokenizer, input_ids, target_str, max_new_tokens=10, device=device
+                model, tokenizer, input_ids, target_str, max_new_tokens=12, device=device
             )
             
             if passed:
@@ -490,6 +514,8 @@ def main():
     parser.add_argument("--skip_warmup", action="store_true", help="Skip router warmup training (frozen router)")
     parser.add_argument("--init_mode", type=str, default="collapse", choices=["collapse", "random"], help="Router initialization mode: 'collapse' (homotopy baseline) or 'random' (untrained random projection)")
     parser.add_argument("--warmup_dataset", type=str, default="niah", choices=["niah", "wikitext"], help="Dataset for router warmup: 'niah' (task-specific) or 'wikitext' (unsupervised general text)")
+    parser.add_argument("--needle_type", type=str, default="outlier", choices=["outlier", "banal"], help="Needle style: 'outlier' (high-surprisal KRAKEN-7729) or 'banal' (in-distribution spherical coordinates)")
+    parser.add_argument("--output_file", type=str, default=None, help="Custom filename for output JSON (default: niah_sweep_results.json)")
     parser.add_argument("--load_in_8bit", action="store_true", help="Load model in 8-bit via bitsandbytes (for 8B on 16GB T4)")
     parser.add_argument("--load_in_4bit", action="store_true", help="Load model in 4-bit NF4")
     parser.add_argument("--output_dir", type=str, default="experiments/results", help="Directory for outputs")
@@ -500,7 +526,7 @@ def main():
     print("SPARSE AI: TOPOLOGICAL NIAH RETRIEVAL SWEEP BENCHMARK")
     print(f"Model: {args.model_id} | Device: {args.device}")
     print(f"Context: {args.context_len} | Needle Positions: {args.num_positions}")
-    print(f"Router Init Mode: '{args.init_mode}' | Warmup: {'Skipped (Frozen)' if args.skip_warmup else args.warmup_dataset}")
+    print(f"Router Init Mode: '{args.init_mode}' | Warmup: {'Skipped (Frozen)' if args.skip_warmup else args.warmup_dataset} | Needle: '{args.needle_type}'")
     if args.load_in_8bit:
         print("Quantization: 8-bit (bitsandbytes)")
     elif args.load_in_4bit:
@@ -545,8 +571,8 @@ def main():
             print("\n[3/4] Warming up router on unsupervised WikiText / natural language text (Zero NIAH Training)...")
             warmup_router_wikitext(model, tokenizer, steps=args.train_steps, device=args.device)
         else:
-            print("\n[3/4] Warming up router on NIAH task distribution...")
-            warmup_router_niah(model, tokenizer, steps=args.train_steps, device=args.device)
+            print(f"\n[3/4] Warming up router on NIAH task distribution (needle='{args.needle_type}')...")
+            warmup_router_niah(model, tokenizer, steps=args.train_steps, device=args.device, needle_type=args.needle_type)
     else:
         print(f"\n[3/4] Skipping router warmup (Frozen Router, init_mode='{args.init_mode}').")
         
@@ -558,12 +584,14 @@ def main():
         context_len=args.context_len,
         num_positions=args.num_positions,
         depth_values=[0, 1, 2, 3, 4, 5],
-        device=args.device
+        device=args.device,
+        needle_type=args.needle_type,
     )
     
     # 6. Save JSON & Figures
     os.makedirs(args.output_dir, exist_ok=True)
-    json_path = os.path.join(args.output_dir, "niah_sweep_results.json")
+    out_filename = args.output_file if args.output_file else "niah_sweep_results.json"
+    json_path = os.path.join(args.output_dir, out_filename)
     with open(json_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\n[Saved] Detailed JSON metrics saved to {json_path}")
