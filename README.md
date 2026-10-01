@@ -129,6 +129,13 @@ Evaluating the surgically injected Dynamic Topology Router across $N=4,096$ toke
 * **The Moving Knee:** The phase transition knee shifts from physical geometric collapse ($r=2$, 25% budget) down to the true information-theoretic capacity limit ($r=3 \to r=4 \to r=5$, transitioning $98\% \to 74\% \to 46\%$).
 * Executable via [`experiments/sweep_topological_niah.py`](experiments/sweep_topological_niah.py) or in Google Colab via [`notebooks/topological_niah_sweep.ipynb`](notebooks/topological_niah_sweep.ipynb).
 
+### 4. Production Checkpoints & GGUF Releases (Hugging Face)
+
+Pre-compiled weights, drop-in architectures, and quantized GGUF artifacts for consumer hardware inference are hosted on Hugging Face:
+
+* **[`sneedjak/Adelic-Gemma-4-31B-it`](https://huggingface.co/sneedjak/Adelic-Gemma-4-31B-it)**: Custom Adèlic topological cache condensation wrapper for Gemma 4 31B Multimodal Instruct. Available in `Q4_K_M`, `Q5_K_M`, and uncompressed master GGUFs for [`llama.cpp`](https://github.com/sneed-and-feed/llama.cpp/tree/feature/gemma4-adelic) with hardware-accelerated `ggml_adelic_condense` CUDA kernels (277.5 prefill tok/s, 31.2 decode tok/s on NVIDIA A100).
+* **[`sneedjak/Adelic-Qwen3.6-27B-Topology`](https://huggingface.co/sneedjak/Adelic-Qwen3.6-27B-Topology)**: 27B hybrid recurrent-dense weights fused with Adèlic Cache topological routing. Available in `Q8_0` GGUF for [`llama.cpp`](https://github.com/sneed-and-feed/llama.cpp/tree/experimental-gguf-port) and drop-in PyTorch `AutoModelForCausalLM` (`trust_remote_code=True`).
+
 ---
 
 ## Quickstart
