@@ -112,13 +112,22 @@ def warmup_router_niah(
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=1e-4)
     
+    # Enable gradient checkpointing during training to prevent activation buildup across all 32 layers
+    if hasattr(model, "gradient_checkpointing_enable"):
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        model.gradient_checkpointing_enable()
+        
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     model.train()
     pbar = tqdm(range(steps), desc="Router Warmup")
     
     for step in pbar:
-        # Train on short contexts (e.g. 1024) to rapidly teach topological separation
+        # Train on compact contexts (384 tokens) to rapidly learn topological separation without quadratic VRAM bloat
         depth = random.uniform(0.1, 0.9)
-        input_ids, target_str, _ = build_niah_context(tokenizer, target_len=1024, needle_depth_ratio=depth)
+        input_ids, target_str, _ = build_niah_context(tokenizer, target_len=384, needle_depth_ratio=depth)
         input_ids = input_ids.to(device)
         
         target_ids = tokenizer.encode(target_str, add_special_tokens=False)
@@ -140,6 +149,12 @@ def warmup_router_niah(
         optimizer.step()
         
         pbar.set_postfix({"loss": f"{loss.item():.3f}", "lb_loss": f"{float(lb_loss):.3f}"})
+        
+    if hasattr(model, "gradient_checkpointing_disable"):
+        model.gradient_checkpointing_disable()
+        
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
         
     model.eval()
     print("[Router Warmup] Complete. Restoring evaluation mode.\n")

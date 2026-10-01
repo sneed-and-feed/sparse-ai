@@ -178,9 +178,19 @@ def get_dynamic_ultrametric_mask(
     """
     if assignments.dim() == 5:
         B, H, S, L, P = assignments.shape
-        a_flat = assignments.reshape(B * H, S, L, P)
-        mask_flat = _compute_distance_mask(a_flat, L, max_dist, local_window)
-        return mask_flat.view(B, H, S, S)
+        chunk_size = 4
+        if H > chunk_size:
+            masks = []
+            for h_start in range(0, H, chunk_size):
+                h_end = min(h_start + chunk_size, H)
+                sub_a = assignments[:, h_start:h_end].reshape(-1, S, L, P)
+                sub_mask = _compute_distance_mask(sub_a, L, max_dist, local_window)
+                masks.append(sub_mask.view(B, h_end - h_start, S, S))
+            return torch.cat(masks, dim=1)
+        else:
+            a_flat = assignments.reshape(B * H, S, L, P)
+            mask_flat = _compute_distance_mask(a_flat, L, max_dist, local_window)
+            return mask_flat.view(B, H, S, S)
     else:
         B, S, L, P = assignments.shape
         return _compute_distance_mask(assignments, L, max_dist, local_window)
