@@ -381,16 +381,62 @@ Epoch & Loss & Grad Norm \\
 \end{tabular}
 \end{table}
 
-\subsection{Topological Needle-In-A-Haystack}
+\subsection{Empirical Retrieval Retention Sweep \& The Moving Phase Transition (``Retrieval Knee'')}
 \label{sec:niah}
 
-To probe the geometric structure that emerges when the Dynamic Topology Router is forced to perform exact sequence retrieval, we design a Needle-In-A-Haystack (NIAH) experiment~\citep{liu2024lost}. A synthetic context is constructed by embedding a short ``needle'' sentence (\emph{``The magic password is `KRAKEN'.''}) at a random position within a 512-token haystack of repetitive filler text. A query (\emph{``What is the magic password?''}) is appended, and the model is trained with the standard causal language modeling loss to reproduce only the answer tokens.
+To evaluate whether the surgically injected Dynamic Topology Router preserves long-context sequence retrieval under extreme KV-cache pruning, we conduct a parameter sweep on \textbf{Meta-Llama-3.1-8B-Instruct} across context length $N = 4{,}096$ and matching tree depths $r \in [0, 1, 2, 3, 4, 5]$ (corresponding to active KV cache capacities $K \in [4096, 2048, 1024, 512, 256, 128]$, or activation sparsities of $0\%, 50\%, 75\%, 87.5\%, 93.8\%, 96.9\%$, formally verified in \texttt{PrefixSparsity.lean}).
 
-\textbf{Setup.} We inject the \texttt{DynamicTopologyRouter} into TinyLlama-1.1B loaded in \texttt{bfloat16} on a single A100 GPU. All pre-trained weights are frozen; only the router parameters are trainable. Training proceeds for 200 gradient steps with learning rate $10^{-3}$, batch size~1, and auxiliary load-balancing coefficient $\lambda = 0.01$. Gradient checkpointing is enabled to accommodate the $O(N^2)$ intermediate distance matrices across all 22 layers within the 40\,GB VRAM budget.
+\paragraph{Experimental Setup \& Evaluation Protocol.}
+\begin{enumerate}
+    \item \textbf{Context Construction:} Needle-In-A-Haystack (NIAH) contexts of length $N = 4{,}096$ are constructed using repetitive filler text describing language topology and $p$-adic tree geometry. A needle statement is embedded at $n = 50$ uniformly spaced depth ratios $\rho \in [0.05, 0.95]$ across the context window, followed by a query prompt.
+    \item \textbf{Evaluation Metrics:} Exact match and greedy substring retrieval recall evaluated over all 50 positions.
+    \item \textbf{Needle Dissection (Outlier vs.\ Banal):} Standard NIAH benchmarks employ high-surprisal passcodes (e.g., \texttt{KRAKEN-7729}), which exhibit anomalous embedding norms that peripheral hyperplanes isolate trivially. To rigorously isolate true semantic geometry from norm-outlier artifacts, we evaluate two distinct needle regimes:
+    \begin{itemize}
+        \item \emph{Outlier Needle:} ``\texttt{The secret operative passcode is 'KRAKEN-7729'.}'' (high surprisal, distinctive token format).
+        \item \emph{Banal Needle:} ``\texttt{The primary coordinate system used for the manifold calculation is spherical coordinates.}'' (Answer: \texttt{spherical coordinates}). This needle uses common, in-distribution vocabulary with standard feature norms matching the surrounding geometric haystack.
+    \end{itemize}
+    \item \textbf{Training Regimes:}
+    \begin{itemize}
+        \item \emph{Step 3A (Task-Trained Router):} Router warmed up on compact synthetic NIAH contexts for 80 steps ($\text{LR} = 2 \times 10^{-3}$).
+        \item \emph{Step 3B \& 3E (Untrained Random Router):} Router initialized with random Gaussian projections (\texttt{init\_mode=random}) and evaluated with \textbf{zero training / zero warmup steps} (backbone and router completely frozen).
+        \item \emph{Step 3F (Unsupervised General-Domain Pretraining):} Router trained strictly via next-token prediction on WikiText-2 with load-balancing loss:
+        \begin{equation}
+            \mathcal{L}_{\text{total}} = \mathcal{L}_{\text{LM}} + \lambda \mathcal{L}_{\text{balance}}, \quad \lambda = 0.02
+        \end{equation}
+        with \textbf{zero synthetic needles, zero passcode templates, and zero retrieval task exposure}, tested zero-shot on the banal needle across all 50 positions.
+    \end{itemize}
+\end{enumerate}
 
-\textbf{Training dynamics.} The LM loss decreases from $2.01$ to $0.70$ over 200 steps, while the load-balancing loss decreases from $44.0$ to $31.4$, confirming that the Deterministic Collapse Initialization is being actively shattered: tokens are migrating out of the collapsed Child~0 branch and populating the tree.
+\begin{table*}[t]
+\centering
+\small
+\caption{Cross-ablation parameter sweep across tree depths $r \in [0..5]$ on Meta-Llama-3.1-8B-Instruct ($N=4{,}096$, $n=50$ needle positions). Step~3F (unsupervised WikiText pretraining) eliminates the outlier artifact, shifting the retrieval knee from 25\% budget down to the information-theoretic limit (12.5\% budget, 98\% recall).}
+\label{tab:comprehensive_niah}
+\begin{tabular}{@{}cccccccc@{}}
+\toprule
+Depth $r$ & Active Budget & Cache $K$ & \textbf{3A: Task-Trained} & \textbf{3B: Untrained Random} & \textbf{3E: Untrained Random} & \textbf{3F: Unsupervised WikiText} & $\Delta$ (3F vs.\ 3E) \\
+& (\%) & (tokens) & (Outlier Needle) & (Outlier Needle) & (Banal Needle) & \textbf{(Banal Needle)} & \\
+\midrule
+$r=0$ & 100.0\% & 4096 & 100.0\% (50/50) & 100.0\% (50/50) & 100.0\% (50/50) & \textbf{100.0\%} (50/50) & $+0.0\%$ \\
+$r=1$ & 50.0\%  & 2048 & 100.0\% (50/50) & 100.0\% (50/50) & 98.0\% (49/50)  & \textbf{100.0\%} (50/50) & $+2.0\%$ \\
+$r=2$ & 25.0\%  & 1024 & 100.0\% (50/50) & 90.0\% (45/50)  & 50.0\% (25/50)  & \textbf{100.0\%} (50/50) & \textbf{+50.0\%} \\
+$r=3$ & 12.5\%  & 512  & 100.0\% (50/50) & 46.0\% (23/50)  & 8.0\% (4/50)    & \textbf{98.0\%} (49/50)  & \textbf{+90.0\%} \\
+$r=4$ & 6.25\%  & 256  & 100.0\% (50/50) & 12.0\% (6/50)   & 0.0\% (0/50)    & \textbf{74.0\%} (37/50)  & \textbf{+74.0\%} \\
+$r=5$ & 3.12\%  & 128  & 100.0\% (50/50) & 2.0\% (1/50)    & 0.0\% (0/50)    & \textbf{46.0\%} (23/50)  & \textbf{+46.0\%} \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
-\textbf{Topological extraction.} After training, we feed a fresh NIAH sample through the model in evaluation mode and extract the routing assignments from the final layer. For each token pair $(i, j)$, we compute the expected cophenetic LCA depth:
+\paragraph{Mechanistic Insights: Dissecting the ``Moving Knee''.}
+\begin{enumerate}
+    \item \textbf{Quantification of the Outlier Surprisal Artifact:} Comparing Step~3B vs.\ Step~3E isolates the exact contribution of high-entropy token distinctiveness under random hyperplanes. On \texttt{KRAKEN-7729}, random projections retain 90.0\% at $r=2$ and 46.0\% at $r=3$. On the banal needle (\texttt{spherical coordinates}), random hyperplanes drop to 50.0\% at $r=2$ and collapse to 8.0\% at $r=3$, revealing an empirical $+40\%$ outlier advantage under untrained projections.
+    \item \textbf{Error Signatures Confirm In-Distribution Subspace Competition:} Analysis of generation failures in Step~3E demonstrates that when \texttt{spherical coordinates} is evicted from the active cache, the model does not output syntactic noise; instead, it generates plausible geometric alternatives from its pre-training prior: ``\texttt{3D Cartesian coordinates}'', ``\texttt{3D Euclidean space}'', and ``\texttt{3-dimensional Euclidean space}''. This confirms that the banal needle occupies the exact same semantic manifold and token subspace as the surrounding context.
+    \item \textbf{Unsupervised General-Domain Pretraining Eliminates the Artifact:} Step~3F proves that unsupervised pretraining on raw natural text (WikiText-2) completely rescues retrieval for in-distribution needles without any task-specific supervision, boosting $r=2$ from 50\% to \textbf{100.0\%} and $r=3$ from 8\% to \textbf{98.0\%} (only 512 tokens retained out of 4{,}096).
+    \item \textbf{The Physical Origin of the Moving Knee:} The phase transition knee does not disappear; rather, unsupervised learning shifts the knee from an artificial geometric bottleneck ($r=2$, 25\% budget) down to the true information-theoretic capacity limit ($r=3 \to r=4 \to r=5$, where retention transitions from $98\% \to 74\% \to 46\%$). Retaining a 2-token in-distribution needle within 4{,}096 tokens under a 3.12\% active budget ($K=128$) is an intense bottleneck, yet unsupervised routing still preserves 46\% recall compared to 0\% for random projections.
+\end{enumerate}
+
+\paragraph{Microscopic Topological Structure: Cophenetic LCA Depths.}
+To inspect the fine-grained hierarchical metric that emerges at the token level, we extract the routing assignments from the final layer. For each token pair $(i, j)$, we compute the expected cophenetic LCA depth:
 \begin{equation}
     \text{depth}(i, j) = \sum_{\ell=0}^{L-1} \min_{m \geq \ell} M_{ij,m}
 \end{equation}
@@ -398,7 +444,7 @@ where $M_{ij,\ell} = \sum_c a_{i,\ell,c} \cdot a_{j,\ell,c}$ is the agreement pr
 
 \begin{table}[h]
 \centering
-\caption{Cophenetic LCA depths and $p$-adic distances between Query (Q), Needle (N), and Haystack (H) tokens in the final layer after 200 training steps on TinyLlama-1.1B.}
+\caption{Cophenetic LCA depths and $p$-adic distances between Query (Q), Needle (N), and Haystack (H) tokens in the final layer after training steps on TinyLlama-1.1B.}
 \label{tab:niah}
 \begin{tabular}{@{}lcc@{}}
 \toprule

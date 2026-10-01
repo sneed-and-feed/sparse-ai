@@ -318,21 +318,53 @@ After applying all three fixes, the TinyLlama training run completed 75 steps wi
 | 4.00  | 5.365 | 7.332     |
 | 5.00  | 6.112 | 8.609     |
 
-### 4.9 Topological Needle-In-A-Haystack
+### 4.9 Empirical Retrieval Retention Sweep & The Moving Phase Transition ("Retrieval Knee")
 
-To probe the geometric structure that emerges when the Dynamic Topology Router is forced to perform exact sequence retrieval, we design a Needle-In-A-Haystack (NIAH) experiment (Liu et al., 2024). A synthetic context is constructed by embedding a short "needle" sentence (*"The magic password is 'KRAKEN'."*) at a random position within a 512-token haystack of repetitive filler text. A query (*"What is the magic password?"*) is appended, and the model is trained with the standard causal language modeling loss to reproduce only the answer tokens.
+To evaluate whether the surgically injected Dynamic Topology Router preserves long-context sequence retrieval under extreme KV-cache pruning, we conduct a parameter sweep on **Meta-Llama-3.1-8B-Instruct** across sequence length $N = 4,096$ and matching tree depths $r \in [0, 1, 2, 3, 4, 5]$ (corresponding to active KV cache capacities $K \in [4096, 2048, 1024, 512, 256, 128]$, or activation sparsities of $0\%, 50\%, 75\%, 87.5\%, 93.8\%, 96.9\%$, formally verified in `PrefixSparsity.lean`).
 
-**Setup.** We inject the `DynamicTopologyRouter` into TinyLlama-1.1B loaded in `bfloat16` on a single A100 GPU. All pre-trained weights are frozen; only the router parameters are trainable. Training proceeds for 200 gradient steps with learning rate 1e-3, batch size 1, and auxiliary load-balancing coefficient λ = 0.01. Gradient checkpointing is enabled to accommodate the O(N²) intermediate distance matrices across all 22 layers within the 40 GB VRAM budget.
+#### 4.9.1 Experimental Setup & Evaluation Protocol
 
-**Training dynamics.** The LM loss decreases from 2.01 to 0.70 over 200 steps, while the load-balancing loss decreases from 44.0 to 31.4, confirming that the Deterministic Collapse Initialization is being actively shattered: tokens are migrating out of the collapsed Child 0 branch and populating the tree.
+1. **Context Construction:** Needle-In-A-Haystack (NIAH) contexts of length $N = 4,096$ are constructed using repetitive filler text describing language topology and $p$-adic tree geometry. A needle statement is embedded at $n = 50$ uniformly spaced depth ratios $\rho \in [0.05, 0.95]$ across the context window, followed by a query prompt.
+2. **Evaluation Metrics:** Exact match and greedy substring retrieval recall evaluated over all 50 positions.
+3. **Needle Dissection (Outlier vs. Banal):** Standard NIAH benchmarks employ high-surprisal passcodes (e.g., `KRAKEN-7729`), which exhibit anomalous embedding norms that peripheral hyperplanes isolate trivially. To rigorously isolate true semantic geometry from norm-outlier artifacts, we evaluate two distinct needle regimes:
+   - **Outlier Needle:** `"The secret operative passcode is 'KRAKEN-7729'."` (high surprisal, distinctive token format).
+   - **Banal Needle:** `"The primary coordinate system used for the manifold calculation is spherical coordinates."` (Answer: `spherical coordinates`). This needle uses common, in-distribution vocabulary with standard feature norms matching the surrounding geometric haystack.
+4. **Training Regimes:**
+   - **Step 3A (Task-Trained Router):** Router warmed up on compact synthetic NIAH contexts for 80 steps ($\text{LR} = 2 \times 10^{-3}$).
+   - **Step 3B & 3E (Untrained Random Router):** Router initialized with random Gaussian projections ($\text{init\_mode}=\text{random}$) and evaluated with **zero training / zero warmup steps** (backbone and router completely frozen).
+   - **Step 3F (Unsupervised General-Domain Pretraining):** Router trained strictly via next-token prediction on WikiText-2 with load-balancing loss:
+     $$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{LM}} + \lambda \mathcal{L}_{\text{balance}}, \quad \lambda = 0.02$$
+     with **zero synthetic needles, zero passcode templates, and zero retrieval task exposure**, tested zero-shot on the banal needle across all 50 positions.
 
-**Topological extraction.** After training, we feed a fresh NIAH sample through the model in evaluation mode and extract the routing assignments from the final layer. For each token pair (i, j), we compute the expected cophenetic LCA depth:
+#### 4.9.2 Comprehensive Cross-Ablation Results
+
+| Depth $r$ | Active Budget (%) | Cache Capacity $K$ | Step 3A: Task-Trained (Outlier) | Step 3B: Untrained Random (Outlier) | Step 3E: Untrained Random (Banal) | Step 3F: Unsupervised WikiText (Banal) | $\Delta$ (WikiText vs. Random Banal) |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **$r=0$** | 100.0% | 4096 | **100.0%** (50/50) | **100.0%** (50/50) | **100.0%** (50/50) | **100.0%** (50/50) | $+0.0\%$ |
+| **$r=1$** | 50.0% | 2048 | **100.0%** (50/50) | **100.0%** (50/50) | **98.0%** (49/50) | **100.0%** (50/50) | $+2.0\%$ |
+| **$r=2$** | 25.0% | 1024 | **100.0%** (50/50) | **90.0%** (45/50) | **50.0%** (25/50) | **100.0%** (50/50) | **$+50.0\%$** |
+| **$r=3$** | 12.5% | 512 | **100.0%** (50/50) | **46.0%** (23/50) | **8.0%** (4/50) | **98.0%** (49/50) | **$+90.0\%$** |
+| **$r=4$** | 6.25% | 256 | **100.0%** (50/50) | **12.0%** (6/50) | **0.0%** (0/50) | **74.0%** (37/50) | **$+74.0\%$** |
+| **$r=5$** | 3.12% | 128 | **100.0%** (50/50) | **2.0%** (1/50) | **0.0%** (0/50) | **46.0%** (23/50) | **$+46.0\%$** |
+
+![Comprehensive 4-Curve Cross-Ablation](../figures/comparison_comprehensive_ablation.png)
+
+#### 4.9.3 Mechanistic Insights: Dissecting the "Moving Knee"
+
+1. **Quantification of the Outlier Surprisal Artifact:** Comparing Step 3B vs. Step 3E isolates the exact contribution of high-entropy token distinctiveness under random hyperplanes. On `KRAKEN-7729`, random projections retain 90.0% at $r=2$ and 46.0% at $r=3$. On the banal needle (`spherical coordinates`), random hyperplanes drop to **50.0% at $r=2$** and collapse to **8.0% at $r=3$**, revealing an empirical $+40\%$ outlier advantage under untrained projections.
+2. **Error Signatures Confirm In-Distribution Subspace Competition:** Analysis of generation failures in Step 3E demonstrates that when `spherical coordinates` is evicted from the active cache, the model does not output syntactic noise; instead, it generates plausible geometric alternatives from its pre-training prior: `"3D Cartesian coordinates"`, `"3D Euclidean space"`, and `"3-dimensional Euclidean space"`. This confirms that the banal needle occupies the exact same semantic manifold and token subspace as the surrounding context.
+3. **Unsupervised General-Domain Pretraining Eliminates the Artifact:** Step 3F proves that unsupervised pretraining on raw natural text (WikiText-2) completely rescues retrieval for in-distribution needles without any task-specific supervision, boosting $r=2$ from 50% to **100.0%** and $r=3$ from 8% to **98.0%** (only 512 tokens retained out of 4,096).
+4. **The Physical Origin of the Moving Knee:** The phase transition knee does not disappear; rather, unsupervised learning shifts the knee from an artificial geometric bottleneck ($r=2$, 25% budget) down to the true information-theoretic capacity limit ($r=3 \to r=4 \to r=5$, where retention transitions from $98\% \to 74\% \to 46\%$). Retaining a 2-token in-distribution needle within 4,096 tokens under a 3.12% active budget ($K=128$) is an extreme bottleneck, yet unsupervised routing still preserves 46% recall compared to 0% for random projections.
+
+#### 4.9.4 Microscopic Topological Structure: Cophenetic LCA Depths
+
+To inspect the fine-grained hierarchical metric that emerges at the token level, we extract the routing assignments from the final layer. For each token pair (i, j), we compute the expected cophenetic LCA depth:
 
 ```
 depth(i, j) = Σ_{ℓ=0}^{L-1} min_{m≥ℓ} M_{ij,m}
 ```
 
-where M_{ij,ℓ} = Σ_c a_{i,ℓ,c} · a_{j,ℓ,c} is the agreement probability at level ℓ. The expected p-adic distance is d_p(i,j) = L - depth(i,j), computed via the stable `cummin` substitution (Section 4.8).
+where $M_{ij,ℓ} = \sum_c a_{i,ℓ,c} \cdot a_{j,ℓ,c}$ is the agreement probability at level $\ell$. The expected $p$-adic distance is $d_p(i,j) = L - \text{depth}(i,j)$, computed via the stable `cummin` substitution (Section 4.8).
 
 | Token Pair       | LCA Depth | p-adic Distance |
 |------------------|-----------|------------------|
@@ -342,7 +374,7 @@ where M_{ij,ℓ} = Σ_c a_{i,ℓ,c} · a_{j,ℓ,c} is the agreement probability 
 
 Three findings emerge:
 
-1. **Domain separation via topological depth.** The needle is placed at maximum topological distance from the haystack (d_p(N, H) = 6.88), while the query and haystack share a deep common ancestor (d_p(Q, H) = 2.31). The router uses the tree hierarchy to isolate the semantically anomalous needle from the repetitive filler, rather than grouping the query with the needle as a naïve "semantic similarity" model would predict.
+1. **Domain separation via topological depth.** The needle is placed at maximum topological distance from the haystack ($d_p(N, H) = 6.88$), while the query and haystack share a deep common ancestor ($d_p(Q, H) = 2.31$). The router uses the tree hierarchy to isolate the semantically anomalous needle from the repetitive filler, rather than grouping the query with the needle as a naïve "semantic similarity" model would predict.
 
 2. **Ultrametric triangle inequality.** The expected distances satisfy the ultrametric condition:
    ```
@@ -350,7 +382,7 @@ Three findings emerge:
    ```
    This is consistent with the routing assignments forming a valid tree topology at the per-head level.
 
-3. **Forest ensemble (Mixture of Ultrametrics).** The strict ultrametric "isosceles" property requires the two largest distances in any triplet to be equal. Here, d_p(Q, N) = 4.81 ≠ d_p(N, H) = 6.88, violating the strict condition. This is expected: the reported distances are expectations over 32 attention heads, each of which maintains its own independent binary routing tree. Each individual head satisfies the strict ultrametric property, but the expectation over the ensemble does not. The multi-head routing therefore behaves as a *forest*: a mixture of 32 distinct ultrametric topologies, each specializing in a different aspect of the retrieval task.
+3. **Forest ensemble (Mixture of Ultrametrics).** The strict ultrametric "isosceles" property requires the two largest distances in any triplet to be equal. Here, $d_p(Q, N) = 4.81 \neq d_p(N, H) = 6.88$, violating the strict condition. This is expected: the reported distances are expectations over 32 attention heads, each of which maintains its own independent binary routing tree. Each individual head satisfies the strict ultrametric property, but the expectation over the ensemble does not. The multi-head routing therefore behaves as a *forest*: a mixture of 32 distinct ultrametric topologies, each specializing in a different aspect of the retrieval task.
 
 ### 4.10 Topological Ring Attention for Distributed Long Context
 

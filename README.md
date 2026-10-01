@@ -109,13 +109,25 @@ sparse-ai/
 
 In distributed long-context training across multi-node clusters (**Topological Ring Attention**), exchanging tokens only between active hierarchical tree branches yields a **78.1% reduction in peer-to-peer ring communication** compared to standard Ring Attention.
 
-### 3. Topological Needle-In-A-Haystack & Retrieval Retention Curve ($N = 4,096$)
+### 3. Empirical Retrieval Retention Sweep & The Moving Phase Transition ($N = 4,096$)
 
-Evaluating the Dynamic Topology Router across $N=4,096$ tokens and 50 random needle positions sweeps the empirical phase-transition curve:
-* **Above 20% active budget ($r \le 2$):** Isolates the needle branch with **$>95\%$ recall**, matching dense performance while delivering a **$4\times$ memory footprint reduction**.
-* **At 12–15% active budget ($r = 3$):** The characteristic selective KV "retrieval knee" appears.
-* **Below 10% active budget ($r \ge 4$):** Single-token needle retrieval collapses towards zero (information starvation).
-* Executable via [`experiments/sweep_topological_niah.py`](experiments/sweep_topological_niah.py) or in Google Colab via [`notebooks/topological_niah_sweep.ipynb`](notebooks/topological_niah_sweep.ipynb) (~15 minutes on a free Tesla T4).
+Evaluating the surgically injected Dynamic Topology Router across $N=4,096$ tokens and 50 uniformly sampled needle positions ($\text{depth} \in [0.05, 0.95]$) on **Meta-Llama-3.1-8B-Instruct** rigorously isolates representation geometry from synthetic benchmark artifacts:
+
+| Depth $r$ | Active Budget (%) | Cache Capacity $K$ | Step 3A: Task-Trained (Outlier) | Step 3B: Untrained Random (Outlier) | Step 3E: Untrained Random (Banal) | **Step 3F: Unsupervised WikiText (Banal)** | $\Delta$ (3F vs. 3E) |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **$r=0$** | 100.0% | 4096 | **100.0%** (50/50) | **100.0%** (50/50) | **100.0%** (50/50) | **100.0%** (50/50) | $+0.0\%$ |
+| **$r=1$** | 50.0% | 2048 | **100.0%** (50/50) | **100.0%** (50/50) | **98.0%** (49/50) | **100.0%** (50/50) | $+2.0\%$ |
+| **$r=2$** | 25.0% | 1024 | **100.0%** (50/50) | **90.0%** (45/50) | **50.0%** (25/50) | **100.0%** (50/50) | **$+50.0\%$** |
+| **$r=3$** | 12.5% | 512 | **100.0%** (50/50) | **46.0%** (23/50) | **8.0%** (4/50) | **98.0%** (49/50) | **$+90.0\%$** |
+| **$r=4$** | 6.25% | 256 | **100.0%** (50/50) | **12.0%** (6/50) | **0.0%** (0/50) | **74.0%** (37/50) | **$+74.0\%$** |
+| **$r=5$** | 3.12% | 128 | **100.0%** (50/50) | **2.0%** (1/50) | **0.0%** (0/50) | **46.0%** (23/50) | **$+46.0\%$** |
+
+![Comprehensive 4-Curve Cross-Ablation](figures/comparison_comprehensive_ablation.png)
+
+* **Outlier Surprisal Quantification:** High-entropy passcodes (`KRAKEN-7729`, 3B) grant an artificial $+40\%$ advantage under random projections compared to banal in-distribution needles (`spherical coordinates`, 3E).
+* **Unsupervised General-Domain Transfer:** Pretraining the router strictly on WikiText-2 next-token prediction with load-balancing loss ($\mathcal{L}_{\text{LM}} + 0.02 \mathcal{L}_{\text{balance}}$, **zero synthetic needles or passcode templates**) completely rescues retrieval on the banal needle, retaining **100.0% at $r=2$** (75% sparsity) and **98.0% at $r=3$** (87.5% sparsity, only 512 tokens).
+* **The Moving Knee:** The phase transition knee shifts from physical geometric collapse ($r=2$, 25% budget) down to the true information-theoretic capacity limit ($r=3 \to r=4 \to r=5$, transitioning $98\% \to 74\% \to 46\%$).
+* Executable via [`experiments/sweep_topological_niah.py`](experiments/sweep_topological_niah.py) or in Google Colab via [`notebooks/topological_niah_sweep.ipynb`](notebooks/topological_niah_sweep.ipynb).
 
 ---
 
