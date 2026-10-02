@@ -1,0 +1,104 @@
+{
+  "type": "modularity_qubo",
+  "instance_id": "syn_n16_seed2002_cut1",
+  "graph_id": "syn_n16_seed2002",
+  "graph_type": "synthetic_hsbm",
+  "num_nodes": 16,
+  "num_edges": 16,
+  "scale_cut": 1,
+  "d_max": 1.0,
+  "num_couplers": 8,
+  "total_possible_couplers": 120,
+  "sparsity": 0.9333333333333333,
+  "linear": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.0,
+    "14": 0.0,
+    "15": 0.0
+  },
+  "quadratic": [
+    {
+      "u": 0,
+      "v": 1,
+      "weight": -0.02734375
+    },
+    {
+      "u": 2,
+      "v": 3,
+      "weight": -0.029296875
+    },
+    {
+      "u": 4,
+      "v": 5,
+      "weight": -0.029296875
+    },
+    {
+      "u": 6,
+      "v": 7,
+      "weight": -0.0283203125
+    },
+    {
+      "u": 8,
+      "v": 9,
+      "weight": -0.0234375
+    },
+    {
+      "u": 10,
+      "v": 11,
+      "weight": -0.029296875
+    },
+    {
+      "u": 12,
+      "v": 13,
+      "weight": -0.025390625
+    },
+    {
+      "u": 14,
+      "v": 15,
+      "weight": -0.029296875
+    }
+  ],
+  "ground_truth_partition": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7": 0,
+    "8": 1,
+    "9": 1,
+    "10": 1,
+    "11": 1,
+    "12": 1,
+    "13": 1,
+    "14": 1,
+    "15": 1
+  },
+  "ground_state_energy": -0.1826171875,
+  "is_energy_exact": true,
+  "certification_method": "scip",
+  "realized_modularity_scip": 0.0,
+  "realized_modularity_louvain": 0.537109375,
+  "realized_modularity_greedy": 0.537109375,
+  "optimal_chain_strength": 0.03334442589887237,
+  "chain_strengths": [
+    0.022229617265914915,
+    0.03334442589887237,
+    0.04445923453182983
+  ],
+  "offset": 0.0390625
+}

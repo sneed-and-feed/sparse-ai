@@ -1,0 +1,57 @@
+{
+  "suite_name": "Direction 3: Hardware-Aware Sparse Quantum Boltzmann Machines (HQ-QBM)",
+  "description": "HQ-QBM benchmark suite and Leap QPU quota manifest",
+  "is_pilot": false,
+  "total_models": 3,
+  "pegasus_m": 16,
+  "models": [
+    {
+      "model_id": "hq_qbm_bas4x4",
+      "dataset_name": "bars_and_stripes",
+      "num_visible": 16,
+      "num_hidden": 4,
+      "routing_temperature": 0.20654248397928862,
+      "max_visible_degree": 2,
+      "checkpoint_file": "checkpoints/hq_qbm_bas4x4_pretrained.json",
+      "num_couplers": 20,
+      "pegasus_max_chain_length": 1,
+      "pegasus_dilation_ratio": 1.0,
+      "pegasus_lmax_compliant": true,
+      "reconstruction_mse": 0.829297661781311,
+      "exact_nll": 10.765661239624023,
+      "total_variation_distance": 0.999301509430552
+    },
+    {
+      "model_id": "hq_qbm_dyck16",
+      "dataset_name": "dyck_sequences",
+      "num_visible": 16,
+      "num_hidden": 4,
+      "routing_temperature": 0.20654248397928862,
+      "max_visible_degree": 2,
+      "checkpoint_file": "checkpoints/hq_qbm_dyck16_pretrained.json",
+      "num_couplers": 20,
+      "pegasus_max_chain_length": 1,
+      "pegasus_dilation_ratio": 1.0,
+      "pegasus_lmax_compliant": true,
+      "reconstruction_mse": 0.7504681944847107,
+      "exact_nll": 9.358452796936035,
+      "total_variation_distance": 0.8865896671181703
+    },
+    {
+      "model_id": "hq_qbm_digits8x8",
+      "dataset_name": "downscaled_digits",
+      "num_visible": 64,
+      "num_hidden": 8,
+      "routing_temperature": 0.20654248397928862,
+      "max_visible_degree": 2,
+      "checkpoint_file": "checkpoints/hq_qbm_digits8x8_pretrained.json",
+      "num_couplers": 72,
+      "pegasus_max_chain_length": 2,
+      "pegasus_dilation_ratio": 1.0555555555555556,
+      "pegasus_lmax_compliant": true,
+      "reconstruction_mse": 0.9186368584632874,
+      "exact_nll": null,
+      "total_variation_distance": null
+    }
+  ]
+}

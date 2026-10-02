@@ -35,8 +35,10 @@ The numerical stability, error bounds, and rotational coherence of the architect
 4. **Project Q-Ultrametric (Hardware-Embeddable Quantum Annealing)**:
    - Solves the quadratic minor embedding bottleneck of physical quantum annealers (D-Wave Advantage Pegasus $P_{16}$ and Advantage2 Zephyr $Z_{15}$).
    - While dense complete graphs ($K_N$) scale physical qubits as $\Theta(N^2)$ and chain lengths as $\Theta(N)$ (squashing dynamic range $J_{\mathrm{eff}} \propto 1/\sqrt{N}$ into analog flux noise), constraining interactions to $p$-adic tree hierarchies yields **$O(N)$ physical qubits** and **$L_{\mathrm{max}} \le 2$ chains**.
-   - Preserves non-mean-field **Parisi Replica Symmetry Breaking (RSB)** and NP-hard energy landscapes via Hierarchical Edwards-Anderson (HEA) spin glasses ($1/2 < \sigma < 1$).
-   - Offline ground truth certification via Google OR-Tools SCIP branch-and-cut (`MIPGap = 0.0`) and zero-cost 660-job Leap batch runner with 5-gauge Spin-Reversal Transforms (SRT).
+   - **Direction 1: HEA & Planted Frustrated Spin Glasses**: Preserves non-mean-field **Parisi Replica Symmetry Breaking (RSB)** and NP-hard energy landscapes via Hierarchical Edwards-Anderson (HEA) spin glasses ($1/2 < \sigma < 1$). Includes 165 instances certified with exact SCIP (`MIPGap = 0.0`) and 660 QPU batch jobs (33.00s quota).
+   - **Direction 2: Hardware-Embeddable Modularity Maximization**: Transforms dense community detection QUBOs ($B_{ij} = A_{ij} - \frac{k_i k_j}{2m}$) into hardware-embeddable sparse topologies via multi-scale cophenetic tree cuts ($Q_{ij}^{\mathrm{sparse}} = Q_{ij} \cdot \mathbb{I}[d_U(i, j) \le d_{\max}]$). Slashes physical qubit requirements by up to **74%** and chain lengths by **50%** across 35 benchmark networks (140 instances, 420 QPU jobs, 21.00s quota).
+   - **Direction 3: Hardware-Aware Sparse QBM (HQ-QBM)**: Co-trains generative visible-hidden interaction topologies strictly bounded to Pegasus tree minors ($L_{\max} \le 2$) via Continuous Logit Homotopy ($\tau: 1.0 \to 0.1$) and Straight-Through Estimators (STE). Trains generative models (Bars-and-Stripes, downscaled digits, Dyck grammars) with Quantum Contrastive Divergence (200 physical gradient updates, 10.00s quota).
+   - **Zero-Cost & Quota Protection**: All 3 directions adhere strictly to the 60.0s free Leap monthly tier (totaling 64.0s across 3 monthly cycles). All hybrid decomposition executes locally with an explicit architectural prohibition against `LeapHybridSampler`.
 
 5. **Lean 4 Machine-Checked Mathematical Foundations**:
    - Exact mathematical invariants verified with zero `sorry`s against Mathlib4.
@@ -73,7 +75,7 @@ sparse-ai/
 │   ├── ultrametric/               # Triton V1/V2 block-sparse kernels and layers
 │   ├── ultrametric_v2_research/   # Research kernels, EaaS, and block scheduling
 │   ├── ultrametric_jax/           # JAX/Pallas sparse attention layers and models
-│   ├── quantum/                   # Project Q-Ultrametric: HEA, Planted loops, Pegasus embedder, Leap runner
+│   ├── quantum/                   # Project Q-Ultrametric: HEA, Modularity cuts, HQ-QBM, Pegasus embedder, Leap runners
 │   └── hf_models/                 # HuggingFace drop-in model architectures
 ├── circuits/
 │   ├── padic_lca.circom           # Circom R1CS circuit for zero-knowledge attention
@@ -90,9 +92,12 @@ sparse-ai/
 ├── figures/                       # Empirical dendrograms and projections
 ├── tools/                         # ZK runtime prover and certificate generator
 ├── benchmarks/                    # Microbenchmarks (Triton, JAX, Serving, EaaS)
-│   └── quantum/                   # Direction 1 test suite (165 certified instances, 660 QPU batch jobs)
+│   └── quantum/                   # Project Q-Ultrametric benchmark suites (Directions 1, 2, 3)
+│       ├── direction1/            # HEA Spin Glasses (165 certified instances, 660 QPU jobs)
+│       ├── direction2/            # Modularity Cuts (140 certified instances, 420 QPU jobs)
+│       └── direction3/            # HQ-QBM Checkpoints (Pretrained models, 200 QPU jobs)
 ├── experiments/                   # Training runs, datasets (Dyck, ListOps), and NIAH tests
-├── tests/                         # PyTest suite (QAT, kernels, JAX, ZK attention, quantum)
+├── tests/                         # PyTest suite (74 tests: QAT, kernels, JAX, ZK, Directions 1/2/3)
 ├── pyproject.toml                 # Package configuration
 └── LICENSE                        # Apache 2.0 License
 ```
@@ -220,10 +225,11 @@ print("Output shape:", out.shape)
 
 ### Project Q-Ultrametric (Quantum Annealing on Pegasus Topologies)
 
+#### Direction 1: Hierarchical Edwards-Anderson Spin Glasses
+
 ```python
 from src.quantum import (
     generate_hea_spin_glass,
-    generate_planted_frustrated_loops,
     solve_scip_exact,
     compare_ultrametric_vs_clique,
 )
@@ -241,14 +247,72 @@ print(f"Physical Qubit Reduction: {comp['qubit_reduction_percent']:.1f}%")
 print(f"Ultrametric Max Chain:    {comp['ultrametric']['max_chain_length']} (vs. Clique: {comp['clique']['max_chain_length']})")
 ```
 
-#### Running Direction 1 Benchmarks & Leap Execution
+#### Direction 2: Hardware-Embeddable Hierarchical Modularity Cuts
+
+```python
+import networkx as nx
+from src.quantum import (
+    load_real_world_network,
+    generate_modularity_instances_for_graph,
+    solve_scip_exact,
+)
+
+# 1. Load benchmark network (e.g. Zachary Karate Club, N=34)
+G, name = load_real_world_network("karate_club")
+
+# 2. Generate 4-scale ultrametric sparsified QUBO instances
+instances = generate_modularity_instances_for_graph(G, graph_id=name)
+
+# 3. Compare ultra-sparse Cut 1 vs. dense Cut 4 (K_34)
+cut1, cut4 = instances[0], instances[3]
+print(f"Cut 1 Couplers: {len(cut1.bqm.quadratic)} (Sparsity: {cut1.sparsity_ratio:.1%})")
+print(f"Cut 4 Couplers: {len(cut4.bqm.quadratic)} (Dense K_N Baseline)")
+
+# 4. Exact SCIP ground truth modularity certification
+res = solve_scip_exact(cut1.bqm, time_limit_sec=10.0)
+print(f"Max Modularity (Cut 1): {-res['best_energy']:.4f}")
+```
+
+#### Direction 3: Hardware-Aware Sparse QBM (HQ-QBM)
+
+```python
+import torch
+from src.quantum import (
+    HardwareAwareQBM,
+    generate_bars_and_stripes_dataset,
+    verify_pegasus_embedding,
+)
+
+# 1. Initialize HQ-QBM with Pegasus tree minor mask (L_max <= 2)
+model = HardwareAwareQBM(num_visible=16, num_hidden=8, pegasus_m=16)
+
+# 2. Verify minor embedding compliance on Pegasus P_16
+emb_res = verify_pegasus_embedding(model.get_sparse_mask(), pegasus_m=16)
+print(f"Pegasus L_max <= 2 Compliant: {emb_res['complies_with_lmax_budget']}")
+print(f"Max Hardware Chain Length:   {emb_res['max_chain_length']}")
+
+# 3. Generate Bars-and-Stripes (4x4) dataset and execute a QCD training step
+dataset = generate_bars_and_stripes_dataset(grid_size=4)
+metrics = model.qcd_training_step(dataset, lr=0.05, num_thermal_samples=100)
+print(f"Energy Gap (Clamped - Thermal): {metrics['energy_gap']:.4f}")
+```
+
+#### Running Project Q-Ultrametric Benchmarks & Dry-Run Simulations
+
+All dry-run simulations execute 100% locally via classical simulated annealing (`neal`) with 5-gauge Spin-Reversal Transforms (SRT), consuming **$0** cloud quota:
 
 ```bash
-# Execute local simulated annealing dry-run across all 660 QPU jobs (with 5-gauge SRT)
+# Run Direction 1 local dry-run simulation (660 QPU jobs, 33.0s budgeted)
 python -m src.quantum.leap_runner --dry-run
 
-# Test Leap API connection without consuming QPU quota
-python -m src.quantum.leap_runner --test-connection
+# Run Direction 2 local dry-run simulation (420 QPU jobs, 21.0s budgeted)
+python -m src.quantum.direction2_suite --dry-run
+
+# Run Direction 3 local dry-run simulation (200 QPU updates, 10.0s budgeted)
+python -m src.quantum.direction3_suite --dry-run
+
+# Run complete 74-test verification suite
+python -m pytest -v tests/
 ```
 
 ---

@@ -1,0 +1,171 @@
+{
+  "type": "modularity_qubo",
+  "instance_id": "real_florentine_families_cut2",
+  "graph_id": "real_florentine_families",
+  "graph_type": "real_world",
+  "num_nodes": 15,
+  "num_edges": 20,
+  "scale_cut": 2,
+  "d_max": 2.0,
+  "num_couplers": 25,
+  "total_possible_couplers": 105,
+  "sparsity": 0.7619047619047619,
+  "linear": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.0,
+    "14": 0.0
+  },
+  "quadratic": [
+    {
+      "u": 0,
+      "v": 1,
+      "weight": -0.021249999999999998
+    },
+    {
+      "u": 0,
+      "v": 9,
+      "weight": 0.00125
+    },
+    {
+      "u": 0,
+      "v": 10,
+      "weight": 0.000625
+    },
+    {
+      "u": 1,
+      "v": 9,
+      "weight": -0.017499999999999998
+    },
+    {
+      "u": 1,
+      "v": 10,
+      "weight": 0.00375
+    },
+    {
+      "u": 2,
+      "v": 3,
+      "weight": -0.019375
+    },
+    {
+      "u": 2,
+      "v": 4,
+      "weight": -0.017499999999999998
+    },
+    {
+      "u": 2,
+      "v": 5,
+      "weight": -0.021249999999999998
+    },
+    {
+      "u": 2,
+      "v": 6,
+      "weight": 0.005625
+    },
+    {
+      "u": 2,
+      "v": 11,
+      "weight": 0.005625
+    },
+    {
+      "u": 3,
+      "v": 4,
+      "weight": -0.017499999999999998
+    },
+    {
+      "u": 3,
+      "v": 5,
+      "weight": 0.00375
+    },
+    {
+      "u": 3,
+      "v": 6,
+      "weight": 0.005625
+    },
+    {
+      "u": 3,
+      "v": 11,
+      "weight": -0.019375
+    },
+    {
+      "u": 4,
+      "v": 5,
+      "weight": 0.005
+    },
+    {
+      "u": 4,
+      "v": 6,
+      "weight": -0.017499999999999998
+    },
+    {
+      "u": 4,
+      "v": 11,
+      "weight": -0.017499999999999998
+    },
+    {
+      "u": 5,
+      "v": 6,
+      "weight": 0.00375
+    },
+    {
+      "u": 5,
+      "v": 11,
+      "weight": 0.00375
+    },
+    {
+      "u": 6,
+      "v": 11,
+      "weight": 0.005625
+    },
+    {
+      "u": 7,
+      "v": 12,
+      "weight": -0.017499999999999998
+    },
+    {
+      "u": 7,
+      "v": 14,
+      "weight": 0.001875
+    },
+    {
+      "u": 8,
+      "v": 13,
+      "weight": -0.023125
+    },
+    {
+      "u": 9,
+      "v": 10,
+      "weight": -0.02375
+    },
+    {
+      "u": 12,
+      "v": 14,
+      "weight": -0.0225
+    }
+  ],
+  "ground_truth_partition": null,
+  "ground_state_energy": -0.17374999999999996,
+  "is_energy_exact": true,
+  "certification_method": "scip",
+  "realized_modularity_scip": 0.24875,
+  "realized_modularity_louvain": 0.3975,
+  "realized_modularity_greedy": 0.39874999999999994,
+  "optimal_chain_strength": 0.02473226637411137,
+  "chain_strengths": [
+    0.016488177582740914,
+    0.02473226637411137,
+    0.03297635516548183
+  ],
+  "offset": 0.041875
+}

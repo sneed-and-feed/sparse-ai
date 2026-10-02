@@ -1,0 +1,50 @@
+{
+  "simulation_mode": "DRY_RUN (Simulated QPU via dwave-neal + 5-gauge SRT)",
+  "total_jobs_executed": 5,
+  "elapsed_wall_clock_sec": 0.209,
+  "initial_reconstruction_mse": 0.9241017699241638,
+  "final_reconstruction_mse": 0.992276,
+  "final_exact_nll": 11.0861,
+  "history": [
+    {
+      "step": 1,
+      "job_id": "qcd_update_001",
+      "clamped_energy": -0.5464038252830505,
+      "thermal_energy": -1.6927088499069214,
+      "energy_gap": 1.1463050246238708,
+      "grad_norm_W": 3.363187551498413
+    },
+    {
+      "step": 2,
+      "job_id": "qcd_update_002",
+      "clamped_energy": -0.37915509939193726,
+      "thermal_energy": -1.1896620988845825,
+      "energy_gap": 0.8105069994926453,
+      "grad_norm_W": 3.523118019104004
+    },
+    {
+      "step": 3,
+      "job_id": "qcd_update_003",
+      "clamped_energy": -0.2563210129737854,
+      "thermal_energy": -0.6199844479560852,
+      "energy_gap": 0.3636634349822998,
+      "grad_norm_W": 3.3762640953063965
+    },
+    {
+      "step": 4,
+      "job_id": "qcd_update_004",
+      "clamped_energy": -0.15357264876365662,
+      "thermal_energy": -0.5032674074172974,
+      "energy_gap": 0.34969475865364075,
+      "grad_norm_W": 3.3340506553649902
+    },
+    {
+      "step": 5,
+      "job_id": "qcd_update_005",
+      "clamped_energy": -0.07408397644758224,
+      "thermal_energy": 0.19745498895645142,
+      "energy_gap": -0.27153896540403366,
+      "grad_norm_W": 3.7643182277679443
+    }
+  ]
+}
