@@ -32,7 +32,13 @@ The numerical stability, error bounds, and rotational coherence of the architect
    - **HuggingFace Integration**: Drop-in model architectures (`src/hf_models/`).
    - **Zero-Knowledge Circuits**: Circom LCA routing arithmetization for verifiable private attention (`circuits/padic_lca.circom`).
 
-4. **Lean 4 Machine-Checked Mathematical Foundations**:
+4. **Project Q-Ultrametric (Hardware-Embeddable Quantum Annealing)**:
+   - Solves the quadratic minor embedding bottleneck of physical quantum annealers (D-Wave Advantage Pegasus $P_{16}$ and Advantage2 Zephyr $Z_{15}$).
+   - While dense complete graphs ($K_N$) scale physical qubits as $\Theta(N^2)$ and chain lengths as $\Theta(N)$ (squashing dynamic range $J_{\mathrm{eff}} \propto 1/\sqrt{N}$ into analog flux noise), constraining interactions to $p$-adic tree hierarchies yields **$O(N)$ physical qubits** and **$L_{\mathrm{max}} \le 2$ chains**.
+   - Preserves non-mean-field **Parisi Replica Symmetry Breaking (RSB)** and NP-hard energy landscapes via Hierarchical Edwards-Anderson (HEA) spin glasses ($1/2 < \sigma < 1$).
+   - Offline ground truth certification via Google OR-Tools SCIP branch-and-cut (`MIPGap = 0.0`) and zero-cost 660-job Leap batch runner with 5-gauge Spin-Reversal Transforms (SRT).
+
+5. **Lean 4 Machine-Checked Mathematical Foundations**:
    - Exact mathematical invariants verified with zero `sorry`s against Mathlib4.
 
 ---
@@ -67,6 +73,7 @@ sparse-ai/
 │   ├── ultrametric/               # Triton V1/V2 block-sparse kernels and layers
 │   ├── ultrametric_v2_research/   # Research kernels, EaaS, and block scheduling
 │   ├── ultrametric_jax/           # JAX/Pallas sparse attention layers and models
+│   ├── quantum/                   # Project Q-Ultrametric: HEA, Planted loops, Pegasus embedder, Leap runner
 │   └── hf_models/                 # HuggingFace drop-in model architectures
 ├── circuits/
 │   ├── padic_lca.circom           # Circom R1CS circuit for zero-knowledge attention
@@ -78,12 +85,14 @@ sparse-ai/
 │   └── lean-toolchain             # Lean toolchain pin (v4.34.0-rc1)
 ├── papers/
 │   ├── learning_to_skip_blocks.*  # Monograph: Dynamic Ultrametric Attention (V1/V2)
-│   └── llama_surgery.*            # Monograph: Surgical Sparsification of LLMs (V3)
+│   ├── llama_surgery.*            # Monograph: Surgical Sparsification of LLMs (V3)
+│   └── future_directions.md       # Project Q-Ultrametric roadmap & quota-exhaustion strategy
 ├── figures/                       # Empirical dendrograms and projections
 ├── tools/                         # ZK runtime prover and certificate generator
 ├── benchmarks/                    # Microbenchmarks (Triton, JAX, Serving, EaaS)
+│   └── quantum/                   # Direction 1 test suite (165 certified instances, 660 QPU batch jobs)
 ├── experiments/                   # Training runs, datasets (Dyck, ListOps), and NIAH tests
-├── tests/                         # PyTest suite (QAT, kernels, JAX, ZK attention)
+├── tests/                         # PyTest suite (QAT, kernels, JAX, ZK attention, quantum)
 ├── pyproject.toml                 # Package configuration
 └── LICENSE                        # Apache 2.0 License
 ```
@@ -209,6 +218,39 @@ out, L = block_sparse_attention(Q, K, V, router_indices, req_depth=2, is_causal=
 print("Output shape:", out.shape)
 ```
 
+### Project Q-Ultrametric (Quantum Annealing on Pegasus Topologies)
+
+```python
+from src.quantum import (
+    generate_hea_spin_glass,
+    generate_planted_frustrated_loops,
+    solve_scip_exact,
+    compare_ultrametric_vs_clique,
+)
+
+# 1. Generate an ultrametric HEA spin glass instance (p-adic tree, Parisi RSB regime)
+hea = generate_hea_spin_glass(num_spins=32, sigma=0.8, seed=42)
+
+# 2. Certify ground state energy exactly via SCIP (MIPGap = 0.0)
+res = solve_scip_exact(hea.bqm, time_limit_sec=10.0)
+print(f"Certified Ground State Energy: {res['best_energy']:.4f}")
+
+# 3. Evaluate Pegasus minor embedding vs. complete graph K_N baseline
+comp = compare_ultrametric_vs_clique(hea.graph)
+print(f"Physical Qubit Reduction: {comp['qubit_reduction_percent']:.1f}%")
+print(f"Ultrametric Max Chain:    {comp['ultrametric']['max_chain_length']} (vs. Clique: {comp['clique']['max_chain_length']})")
+```
+
+#### Running Direction 1 Benchmarks & Leap Execution
+
+```bash
+# Execute local simulated annealing dry-run across all 660 QPU jobs (with 5-gauge SRT)
+python -m src.quantum.leap_runner --dry-run
+
+# Test Leap API connection without consuming QPU quota
+python -m src.quantum.leap_runner --test-connection
+```
+
 ---
 
 ## Citation & Preprints
@@ -217,6 +259,7 @@ Detailed technical monographs with complete mathematical derivations, ablation s
 
 1. **Learning to Skip Blocks**: *Self-Discovered Ultrametric Routing for Hardware-Accelerated Sparse Attention* ([PDF/TeX](papers/learning_to_skip_blocks.tex) | [Markdown](papers/learning_to_skip_blocks.md))
 2. **Llama Surgery**: *Continuous Sparsification of Pre-Trained Language Models via Differentiable Ultrametric Topology Injection* ([PDF/TeX](papers/llama_surgery.tex) | [Markdown](papers/llama_surgery.md))
+3. **Project Q-Ultrametric**: *Hardware-Embeddable Differentiable QUBO Learning for Quantum Annealing* ([Roadmap](FUTURE_DIRECTIONS.md) | [Specification](papers/future_directions.md))
 
 ```bibtex
 @article{sparse_ai_2026,
