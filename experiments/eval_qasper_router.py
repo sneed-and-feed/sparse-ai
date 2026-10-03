@@ -98,6 +98,8 @@ def build_prompt_ids(tokenizer, sample, max_ctx):
         ids = tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}], add_generation_prompt=True, return_tensors="pt"
         )
+        if not isinstance(ids, torch.Tensor):  # newer transformers return a BatchEncoding
+            ids = ids["input_ids"]
     else:
         ids = tokenizer(prompt, return_tensors="pt")["input_ids"]
     return ids, truncated
