@@ -1,0 +1,1944 @@
+{
+  "context_len": 4096,
+  "num_positions": 50,
+  "needle_type": "banal",
+  "depth_ratios": [
+    0.05,
+    0.06836734693877551,
+    0.08673469387755102,
+    0.10510204081632654,
+    0.12346938775510204,
+    0.14183673469387756,
+    0.16020408163265307,
+    0.17857142857142855,
+    0.19693877551020406,
+    0.21530612244897962,
+    0.23367346938775513,
+    0.25204081632653064,
+    0.27040816326530615,
+    0.28877551020408165,
+    0.3071428571428571,
+    0.32551020408163267,
+    0.3438775510204081,
+    0.3622448979591837,
+    0.3806122448979592,
+    0.3989795918367347,
+    0.4173469387755102,
+    0.43571428571428567,
+    0.45408163265306123,
+    0.47244897959183674,
+    0.49081632653061225,
+    0.5091836734693878,
+    0.5275510204081634,
+    0.5459183673469388,
+    0.5642857142857143,
+    0.5826530612244899,
+    0.6010204081632654,
+    0.6193877551020409,
+    0.6377551020408163,
+    0.6561224489795918,
+    0.6744897959183674,
+    0.692857142857143,
+    0.7112244897959185,
+    0.7295918367346939,
+    0.7479591836734695,
+    0.766326530612245,
+    0.7846938775510205,
+    0.803061224489796,
+    0.8214285714285714,
+    0.839795918367347,
+    0.8581632653061225,
+    0.876530612244898,
+    0.8948979591836735,
+    0.913265306122449,
+    0.9316326530612246,
+    0.9500000000000001
+  ],
+  "sweep": {
+    "r_2": {
+      "r": 2,
+      "sparsity_pct": 75.0,
+      "active_budget_pct": 25.0,
+      "effective_capacity_k": 1024,
+      "measured_budget_pct": 62.99,
+      "measured_budget_pct_min": 62.87,
+      "measured_budget_pct_max": 63.18,
+      "measured_mean_allowed_keys": 1290.3,
+      "successes": 39,
+      "total": 50,
+      "recall_pct": 78.0,
+      "trials": [
+        {
+          "pos_idx": 0,
+          "needle_ratio": 0.05,
+          "insert_token_idx": 202,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62869,
+          "mean_allowed_keys": 1287.9
+        },
+        {
+          "pos_idx": 1,
+          "needle_ratio": 0.0684,
+          "insert_token_idx": 277,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62981,
+          "mean_allowed_keys": 1290.2
+        },
+        {
+          "pos_idx": 2,
+          "needle_ratio": 0.0867,
+          "insert_token_idx": 351,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63135,
+          "mean_allowed_keys": 1293.3
+        },
+        {
+          "pos_idx": 3,
+          "needle_ratio": 0.1051,
+          "insert_token_idx": 426,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.\n\nWhat is the primary application of the",
+          "measured_allowed_fraction": 0.62888,
+          "mean_allowed_keys": 1288.3
+        },
+        {
+          "pos_idx": 4,
+          "needle_ratio": 0.1235,
+          "insert_token_idx": 501,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the paper",
+          "measured_allowed_fraction": 0.62985,
+          "mean_allowed_keys": 1290.3
+        },
+        {
+          "pos_idx": 5,
+          "needle_ratio": 0.1418,
+          "insert_token_idx": 575,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.62988,
+          "mean_allowed_keys": 1290.3
+        },
+        {
+          "pos_idx": 6,
+          "needle_ratio": 0.1602,
+          "insert_token_idx": 650,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the text",
+          "measured_allowed_fraction": 0.63177,
+          "mean_allowed_keys": 1294.2
+        },
+        {
+          "pos_idx": 7,
+          "needle_ratio": 0.1786,
+          "insert_token_idx": 724,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.6294,
+          "mean_allowed_keys": 1289.3
+        },
+        {
+          "pos_idx": 8,
+          "needle_ratio": 0.1969,
+          "insert_token_idx": 799,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63022,
+          "mean_allowed_keys": 1291.0
+        },
+        {
+          "pos_idx": 9,
+          "needle_ratio": 0.2153,
+          "insert_token_idx": 873,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62932,
+          "mean_allowed_keys": 1289.2
+        },
+        {
+          "pos_idx": 10,
+          "needle_ratio": 0.2337,
+          "insert_token_idx": 948,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the text",
+          "measured_allowed_fraction": 0.62979,
+          "mean_allowed_keys": 1290.1
+        },
+        {
+          "pos_idx": 11,
+          "needle_ratio": 0.252,
+          "insert_token_idx": 1022,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62928,
+          "mean_allowed_keys": 1289.1
+        },
+        {
+          "pos_idx": 12,
+          "needle_ratio": 0.2704,
+          "insert_token_idx": 1097,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62913,
+          "mean_allowed_keys": 1288.8
+        },
+        {
+          "pos_idx": 13,
+          "needle_ratio": 0.2888,
+          "insert_token_idx": 1171,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62988,
+          "mean_allowed_keys": 1290.3
+        },
+        {
+          "pos_idx": 14,
+          "needle_ratio": 0.3071,
+          "insert_token_idx": 1246,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62949,
+          "mean_allowed_keys": 1289.5
+        },
+        {
+          "pos_idx": 15,
+          "needle_ratio": 0.3255,
+          "insert_token_idx": 1320,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62914,
+          "mean_allowed_keys": 1288.8
+        },
+        {
+          "pos_idx": 16,
+          "needle_ratio": 0.3439,
+          "insert_token_idx": 1395,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.62924,
+          "mean_allowed_keys": 1289.0
+        },
+        {
+          "pos_idx": 17,
+          "needle_ratio": 0.3622,
+          "insert_token_idx": 1469,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63006,
+          "mean_allowed_keys": 1290.7
+        },
+        {
+          "pos_idx": 18,
+          "needle_ratio": 0.3806,
+          "insert_token_idx": 1544,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62948,
+          "mean_allowed_keys": 1289.5
+        },
+        {
+          "pos_idx": 19,
+          "needle_ratio": 0.399,
+          "insert_token_idx": 1619,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.6307,
+          "mean_allowed_keys": 1292.0
+        },
+        {
+          "pos_idx": 20,
+          "needle_ratio": 0.4173,
+          "insert_token_idx": 1693,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62949,
+          "mean_allowed_keys": 1289.5
+        },
+        {
+          "pos_idx": 21,
+          "needle_ratio": 0.4357,
+          "insert_token_idx": 1768,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.62919,
+          "mean_allowed_keys": 1288.9
+        },
+        {
+          "pos_idx": 22,
+          "needle_ratio": 0.4541,
+          "insert_token_idx": 1842,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62975,
+          "mean_allowed_keys": 1290.0
+        },
+        {
+          "pos_idx": 23,
+          "needle_ratio": 0.4724,
+          "insert_token_idx": 1917,
+          "passed": true,
+          "generated": "3D spherical coordinates.\n\nWhat is the primary application of the",
+          "measured_allowed_fraction": 0.62961,
+          "mean_allowed_keys": 1289.8
+        },
+        {
+          "pos_idx": 24,
+          "needle_ratio": 0.4908,
+          "insert_token_idx": 1991,
+          "passed": false,
+          "generated": "3D Euclidean space.  The primary coordinate system used",
+          "measured_allowed_fraction": 0.62965,
+          "mean_allowed_keys": 1289.8
+        },
+        {
+          "pos_idx": 25,
+          "needle_ratio": 0.5092,
+          "insert_token_idx": 2066,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.62892,
+          "mean_allowed_keys": 1288.3
+        },
+        {
+          "pos_idx": 26,
+          "needle_ratio": 0.5276,
+          "insert_token_idx": 2140,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62959,
+          "mean_allowed_keys": 1289.7
+        },
+        {
+          "pos_idx": 27,
+          "needle_ratio": 0.5459,
+          "insert_token_idx": 2215,
+          "passed": true,
+          "generated": "spherical coordinates.  In spherical coordinates, the distance between two",
+          "measured_allowed_fraction": 0.62981,
+          "mean_allowed_keys": 1290.2
+        },
+        {
+          "pos_idx": 28,
+          "needle_ratio": 0.5643,
+          "insert_token_idx": 2289,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the text",
+          "measured_allowed_fraction": 0.62948,
+          "mean_allowed_keys": 1289.5
+        },
+        {
+          "pos_idx": 29,
+          "needle_ratio": 0.5827,
+          "insert_token_idx": 2364,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62988,
+          "mean_allowed_keys": 1290.3
+        },
+        {
+          "pos_idx": 30,
+          "needle_ratio": 0.601,
+          "insert_token_idx": 2438,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the text",
+          "measured_allowed_fraction": 0.62949,
+          "mean_allowed_keys": 1289.5
+        },
+        {
+          "pos_idx": 31,
+          "needle_ratio": 0.6194,
+          "insert_token_idx": 2513,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  The final answer is: $\\",
+          "measured_allowed_fraction": 0.63005,
+          "mean_allowed_keys": 1290.7
+        },
+        {
+          "pos_idx": 32,
+          "needle_ratio": 0.6378,
+          "insert_token_idx": 2588,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the text",
+          "measured_allowed_fraction": 0.63055,
+          "mean_allowed_keys": 1291.7
+        },
+        {
+          "pos_idx": 33,
+          "needle_ratio": 0.6561,
+          "insert_token_idx": 2662,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.62995,
+          "mean_allowed_keys": 1290.4
+        },
+        {
+          "pos_idx": 34,
+          "needle_ratio": 0.6745,
+          "insert_token_idx": 2737,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.\n\nWhat is the primary coordinate system used",
+          "measured_allowed_fraction": 0.62961,
+          "mean_allowed_keys": 1289.8
+        },
+        {
+          "pos_idx": 35,
+          "needle_ratio": 0.6929,
+          "insert_token_idx": 2811,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63033,
+          "mean_allowed_keys": 1291.2
+        },
+        {
+          "pos_idx": 36,
+          "needle_ratio": 0.7112,
+          "insert_token_idx": 2886,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62981,
+          "mean_allowed_keys": 1290.2
+        },
+        {
+          "pos_idx": 37,
+          "needle_ratio": 0.7296,
+          "insert_token_idx": 2960,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63011,
+          "mean_allowed_keys": 1290.8
+        },
+        {
+          "pos_idx": 38,
+          "needle_ratio": 0.748,
+          "insert_token_idx": 3035,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.62998,
+          "mean_allowed_keys": 1290.5
+        },
+        {
+          "pos_idx": 39,
+          "needle_ratio": 0.7663,
+          "insert_token_idx": 3109,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  The final answer is: $\\",
+          "measured_allowed_fraction": 0.6302,
+          "mean_allowed_keys": 1291.0
+        },
+        {
+          "pos_idx": 40,
+          "needle_ratio": 0.7847,
+          "insert_token_idx": 3184,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63007,
+          "mean_allowed_keys": 1290.7
+        },
+        {
+          "pos_idx": 41,
+          "needle_ratio": 0.8031,
+          "insert_token_idx": 3258,
+          "passed": true,
+          "generated": "3D spherical coordinates.\n\nWhat is the primary application of the",
+          "measured_allowed_fraction": 0.62968,
+          "mean_allowed_keys": 1289.9
+        },
+        {
+          "pos_idx": 42,
+          "needle_ratio": 0.8214,
+          "insert_token_idx": 3333,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63006,
+          "mean_allowed_keys": 1290.7
+        },
+        {
+          "pos_idx": 43,
+          "needle_ratio": 0.8398,
+          "insert_token_idx": 3407,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the text",
+          "measured_allowed_fraction": 0.63027,
+          "mean_allowed_keys": 1291.1
+        },
+        {
+          "pos_idx": 44,
+          "needle_ratio": 0.8582,
+          "insert_token_idx": 3482,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.63016,
+          "mean_allowed_keys": 1290.9
+        },
+        {
+          "pos_idx": 45,
+          "needle_ratio": 0.8765,
+          "insert_token_idx": 3556,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the paper",
+          "measured_allowed_fraction": 0.6303,
+          "mean_allowed_keys": 1291.2
+        },
+        {
+          "pos_idx": 46,
+          "needle_ratio": 0.8949,
+          "insert_token_idx": 3631,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63041,
+          "mean_allowed_keys": 1291.4
+        },
+        {
+          "pos_idx": 47,
+          "needle_ratio": 0.9133,
+          "insert_token_idx": 3706,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.63053,
+          "mean_allowed_keys": 1291.6
+        },
+        {
+          "pos_idx": 48,
+          "needle_ratio": 0.9316,
+          "insert_token_idx": 3780,
+          "passed": true,
+          "generated": "spherical coordinates.  The geometry of language is not a linear",
+          "measured_allowed_fraction": 0.63066,
+          "mean_allowed_keys": 1291.9
+        },
+        {
+          "pos_idx": 49,
+          "needle_ratio": 0.95,
+          "insert_token_idx": 3855,
+          "passed": true,
+          "generated": "3D spherical coordinates.\n\nThe final answer is: $\\boxed",
+          "measured_allowed_fraction": 0.63072,
+          "mean_allowed_keys": 1292.0
+        }
+      ]
+    },
+    "r_3": {
+      "r": 3,
+      "sparsity_pct": 87.5,
+      "active_budget_pct": 12.5,
+      "effective_capacity_k": 512,
+      "measured_budget_pct": 55.91,
+      "measured_budget_pct_min": 55.79,
+      "measured_budget_pct_max": 56.12,
+      "measured_mean_allowed_keys": 1145.3,
+      "successes": 34,
+      "total": 50,
+      "recall_pct": 68.0,
+      "trials": [
+        {
+          "pos_idx": 0,
+          "needle_ratio": 0.05,
+          "insert_token_idx": 202,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55847,
+          "mean_allowed_keys": 1144.0
+        },
+        {
+          "pos_idx": 1,
+          "needle_ratio": 0.0684,
+          "insert_token_idx": 277,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55785,
+          "mean_allowed_keys": 1142.8
+        },
+        {
+          "pos_idx": 2,
+          "needle_ratio": 0.0867,
+          "insert_token_idx": 351,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.56118,
+          "mean_allowed_keys": 1149.6
+        },
+        {
+          "pos_idx": 3,
+          "needle_ratio": 0.1051,
+          "insert_token_idx": 426,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.55806,
+          "mean_allowed_keys": 1143.2
+        },
+        {
+          "pos_idx": 4,
+          "needle_ratio": 0.1235,
+          "insert_token_idx": 501,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nWhat is the main idea of the text",
+          "measured_allowed_fraction": 0.55919,
+          "mean_allowed_keys": 1145.5
+        },
+        {
+          "pos_idx": 5,
+          "needle_ratio": 0.1418,
+          "insert_token_idx": 575,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.55845,
+          "mean_allowed_keys": 1144.0
+        },
+        {
+          "pos_idx": 6,
+          "needle_ratio": 0.1602,
+          "insert_token_idx": 650,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.56059,
+          "mean_allowed_keys": 1148.4
+        },
+        {
+          "pos_idx": 7,
+          "needle_ratio": 0.1786,
+          "insert_token_idx": 724,
+          "passed": true,
+          "generated": "3D spherical coordinates. 3D spherical coordinates are a",
+          "measured_allowed_fraction": 0.55859,
+          "mean_allowed_keys": 1144.3
+        },
+        {
+          "pos_idx": 8,
+          "needle_ratio": 0.1969,
+          "insert_token_idx": 799,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55913,
+          "mean_allowed_keys": 1145.4
+        },
+        {
+          "pos_idx": 9,
+          "needle_ratio": 0.2153,
+          "insert_token_idx": 873,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55973,
+          "mean_allowed_keys": 1146.6
+        },
+        {
+          "pos_idx": 10,
+          "needle_ratio": 0.2337,
+          "insert_token_idx": 948,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nThe final answer is: $\\boxed{",
+          "measured_allowed_fraction": 0.55868,
+          "mean_allowed_keys": 1144.4
+        },
+        {
+          "pos_idx": 11,
+          "needle_ratio": 0.252,
+          "insert_token_idx": 1022,
+          "passed": true,
+          "generated": "3D spherical coordinates.  The primary coordinate system used for",
+          "measured_allowed_fraction": 0.55889,
+          "mean_allowed_keys": 1144.9
+        },
+        {
+          "pos_idx": 12,
+          "needle_ratio": 0.2704,
+          "insert_token_idx": 1097,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.55901,
+          "mean_allowed_keys": 1145.1
+        },
+        {
+          "pos_idx": 13,
+          "needle_ratio": 0.2888,
+          "insert_token_idx": 1171,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55899,
+          "mean_allowed_keys": 1145.1
+        },
+        {
+          "pos_idx": 14,
+          "needle_ratio": 0.3071,
+          "insert_token_idx": 1246,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  The 3D Cartesian coordinate",
+          "measured_allowed_fraction": 0.5593,
+          "mean_allowed_keys": 1145.7
+        },
+        {
+          "pos_idx": 15,
+          "needle_ratio": 0.3255,
+          "insert_token_idx": 1320,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.5588,
+          "mean_allowed_keys": 1144.7
+        },
+        {
+          "pos_idx": 16,
+          "needle_ratio": 0.3439,
+          "insert_token_idx": 1395,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55858,
+          "mean_allowed_keys": 1144.2
+        },
+        {
+          "pos_idx": 17,
+          "needle_ratio": 0.3622,
+          "insert_token_idx": 1469,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nThe final answer is: $\\boxed{",
+          "measured_allowed_fraction": 0.55941,
+          "mean_allowed_keys": 1146.0
+        },
+        {
+          "pos_idx": 18,
+          "needle_ratio": 0.3806,
+          "insert_token_idx": 1544,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55957,
+          "mean_allowed_keys": 1146.3
+        },
+        {
+          "pos_idx": 19,
+          "needle_ratio": 0.399,
+          "insert_token_idx": 1619,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.56029,
+          "mean_allowed_keys": 1147.8
+        },
+        {
+          "pos_idx": 20,
+          "needle_ratio": 0.4173,
+          "insert_token_idx": 1693,
+          "passed": true,
+          "generated": "3-dimensional spherical coordinates.  The primary coordinate system used for",
+          "measured_allowed_fraction": 0.55906,
+          "mean_allowed_keys": 1145.2
+        },
+        {
+          "pos_idx": 21,
+          "needle_ratio": 0.4357,
+          "insert_token_idx": 1768,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.5591,
+          "mean_allowed_keys": 1145.3
+        },
+        {
+          "pos_idx": 22,
+          "needle_ratio": 0.4541,
+          "insert_token_idx": 1842,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55952,
+          "mean_allowed_keys": 1146.2
+        },
+        {
+          "pos_idx": 23,
+          "needle_ratio": 0.4724,
+          "insert_token_idx": 1917,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.\n\nWhat is the primary coordinate system used",
+          "measured_allowed_fraction": 0.55907,
+          "mean_allowed_keys": 1145.3
+        },
+        {
+          "pos_idx": 24,
+          "needle_ratio": 0.4908,
+          "insert_token_idx": 1991,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  The 3D Cartesian coordinates",
+          "measured_allowed_fraction": 0.55953,
+          "mean_allowed_keys": 1146.2
+        },
+        {
+          "pos_idx": 25,
+          "needle_ratio": 0.5092,
+          "insert_token_idx": 2066,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55858,
+          "mean_allowed_keys": 1144.2
+        },
+        {
+          "pos_idx": 26,
+          "needle_ratio": 0.5276,
+          "insert_token_idx": 2140,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  The primary coordinate system used for",
+          "measured_allowed_fraction": 0.55966,
+          "mean_allowed_keys": 1146.5
+        },
+        {
+          "pos_idx": 27,
+          "needle_ratio": 0.5459,
+          "insert_token_idx": 2215,
+          "passed": true,
+          "generated": "spherical coordinates.  In standard dense attention, every point is",
+          "measured_allowed_fraction": 0.5597,
+          "mean_allowed_keys": 1146.6
+        },
+        {
+          "pos_idx": 28,
+          "needle_ratio": 0.5643,
+          "insert_token_idx": 2289,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55937,
+          "mean_allowed_keys": 1145.9
+        },
+        {
+          "pos_idx": 29,
+          "needle_ratio": 0.5827,
+          "insert_token_idx": 2364,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55914,
+          "mean_allowed_keys": 1145.4
+        },
+        {
+          "pos_idx": 30,
+          "needle_ratio": 0.601,
+          "insert_token_idx": 2438,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.55869,
+          "mean_allowed_keys": 1144.5
+        },
+        {
+          "pos_idx": 31,
+          "needle_ratio": 0.6194,
+          "insert_token_idx": 2513,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55925,
+          "mean_allowed_keys": 1145.6
+        },
+        {
+          "pos_idx": 32,
+          "needle_ratio": 0.6378,
+          "insert_token_idx": 2588,
+          "passed": true,
+          "generated": "spherical coordinates.  When we speak or write, we traverse",
+          "measured_allowed_fraction": 0.55946,
+          "mean_allowed_keys": 1146.1
+        },
+        {
+          "pos_idx": 33,
+          "needle_ratio": 0.6561,
+          "insert_token_idx": 2662,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.5593,
+          "mean_allowed_keys": 1145.7
+        },
+        {
+          "pos_idx": 34,
+          "needle_ratio": 0.6745,
+          "insert_token_idx": 2737,
+          "passed": true,
+          "generated": "3D spherical coordinates. 3D spherical coordinates are a",
+          "measured_allowed_fraction": 0.55885,
+          "mean_allowed_keys": 1144.8
+        },
+        {
+          "pos_idx": 35,
+          "needle_ratio": 0.6929,
+          "insert_token_idx": 2811,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55922,
+          "mean_allowed_keys": 1145.6
+        },
+        {
+          "pos_idx": 36,
+          "needle_ratio": 0.7112,
+          "insert_token_idx": 2886,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. The manifold is a 3D",
+          "measured_allowed_fraction": 0.55909,
+          "mean_allowed_keys": 1145.3
+        },
+        {
+          "pos_idx": 37,
+          "needle_ratio": 0.7296,
+          "insert_token_idx": 2960,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55849,
+          "mean_allowed_keys": 1144.1
+        },
+        {
+          "pos_idx": 38,
+          "needle_ratio": 0.748,
+          "insert_token_idx": 3035,
+          "passed": true,
+          "generated": "3D spherical coordinates. 3D spherical coordinates are a",
+          "measured_allowed_fraction": 0.5587,
+          "mean_allowed_keys": 1144.5
+        },
+        {
+          "pos_idx": 39,
+          "needle_ratio": 0.7663,
+          "insert_token_idx": 3109,
+          "passed": true,
+          "generated": "3D spherical coordinates. 3D spherical coordinates are a",
+          "measured_allowed_fraction": 0.55884,
+          "mean_allowed_keys": 1144.8
+        },
+        {
+          "pos_idx": 40,
+          "needle_ratio": 0.7847,
+          "insert_token_idx": 3184,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.55875,
+          "mean_allowed_keys": 1144.6
+        },
+        {
+          "pos_idx": 41,
+          "needle_ratio": 0.8031,
+          "insert_token_idx": 3258,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.55856,
+          "mean_allowed_keys": 1144.2
+        },
+        {
+          "pos_idx": 42,
+          "needle_ratio": 0.8214,
+          "insert_token_idx": 3333,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.5587,
+          "mean_allowed_keys": 1144.5
+        },
+        {
+          "pos_idx": 43,
+          "needle_ratio": 0.8398,
+          "insert_token_idx": 3407,
+          "passed": true,
+          "generated": "3D spherical coordinates. 3D spherical coordinates are a",
+          "measured_allowed_fraction": 0.55869,
+          "mean_allowed_keys": 1144.5
+        },
+        {
+          "pos_idx": 44,
+          "needle_ratio": 0.8582,
+          "insert_token_idx": 3482,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  geometry of language is not a",
+          "measured_allowed_fraction": 0.55897,
+          "mean_allowed_keys": 1145.1
+        },
+        {
+          "pos_idx": 45,
+          "needle_ratio": 0.8765,
+          "insert_token_idx": 3556,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. The manifold is a 3D",
+          "measured_allowed_fraction": 0.55889,
+          "mean_allowed_keys": 1144.9
+        },
+        {
+          "pos_idx": 46,
+          "needle_ratio": 0.8949,
+          "insert_token_idx": 3631,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.\n\nThe final answer is: $\\boxed",
+          "measured_allowed_fraction": 0.55872,
+          "mean_allowed_keys": 1144.5
+        },
+        {
+          "pos_idx": 47,
+          "needle_ratio": 0.9133,
+          "insert_token_idx": 3706,
+          "passed": true,
+          "generated": "3D spherical coordinates. The primary coordinate system used for the",
+          "measured_allowed_fraction": 0.55897,
+          "mean_allowed_keys": 1145.1
+        },
+        {
+          "pos_idx": 48,
+          "needle_ratio": 0.9316,
+          "insert_token_idx": 3780,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  The primary coordinate system used for",
+          "measured_allowed_fraction": 0.55904,
+          "mean_allowed_keys": 1145.2
+        },
+        {
+          "pos_idx": 49,
+          "needle_ratio": 0.95,
+          "insert_token_idx": 3855,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.  The primary coordinate system used for",
+          "measured_allowed_fraction": 0.55906,
+          "mean_allowed_keys": 1145.2
+        }
+      ]
+    },
+    "r_4": {
+      "r": 4,
+      "sparsity_pct": 93.75,
+      "active_budget_pct": 6.25,
+      "effective_capacity_k": 256,
+      "measured_budget_pct": 50.23,
+      "measured_budget_pct_min": 50.08,
+      "measured_budget_pct_max": 50.31,
+      "measured_mean_allowed_keys": 1028.9,
+      "successes": 32,
+      "total": 50,
+      "recall_pct": 64.0,
+      "trials": [
+        {
+          "pos_idx": 0,
+          "needle_ratio": 0.05,
+          "insert_token_idx": 202,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50079,
+          "mean_allowed_keys": 1025.9
+        },
+        {
+          "pos_idx": 1,
+          "needle_ratio": 0.0684,
+          "insert_token_idx": 277,
+          "passed": false,
+          "generated": "$\\boxed{Bruhat-Tits}$.\nThe final answer",
+          "measured_allowed_fraction": 0.50139,
+          "mean_allowed_keys": 1027.1
+        },
+        {
+          "pos_idx": 2,
+          "needle_ratio": 0.0867,
+          "insert_token_idx": 351,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.5028,
+          "mean_allowed_keys": 1030.0
+        },
+        {
+          "pos_idx": 3,
+          "needle_ratio": 0.1051,
+          "insert_token_idx": 426,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.5018,
+          "mean_allowed_keys": 1027.9
+        },
+        {
+          "pos_idx": 4,
+          "needle_ratio": 0.1235,
+          "insert_token_idx": 501,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50223,
+          "mean_allowed_keys": 1028.8
+        },
+        {
+          "pos_idx": 5,
+          "needle_ratio": 0.1418,
+          "insert_token_idx": 575,
+          "passed": false,
+          "generated": "$\\boxed{3}$.\nThe final answer is: $\\",
+          "measured_allowed_fraction": 0.50143,
+          "mean_allowed_keys": 1027.2
+        },
+        {
+          "pos_idx": 6,
+          "needle_ratio": 0.1602,
+          "insert_token_idx": 650,
+          "passed": true,
+          "generated": "$\\boxed{spherical coordinates}$.\nThe final answer is:",
+          "measured_allowed_fraction": 0.50312,
+          "mean_allowed_keys": 1030.6
+        },
+        {
+          "pos_idx": 7,
+          "needle_ratio": 0.1786,
+          "insert_token_idx": 724,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50179,
+          "mean_allowed_keys": 1027.9
+        },
+        {
+          "pos_idx": 8,
+          "needle_ratio": 0.1969,
+          "insert_token_idx": 799,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50142,
+          "mean_allowed_keys": 1027.2
+        },
+        {
+          "pos_idx": 9,
+          "needle_ratio": 0.2153,
+          "insert_token_idx": 873,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.50179,
+          "mean_allowed_keys": 1027.9
+        },
+        {
+          "pos_idx": 10,
+          "needle_ratio": 0.2337,
+          "insert_token_idx": 948,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50215,
+          "mean_allowed_keys": 1028.7
+        },
+        {
+          "pos_idx": 11,
+          "needle_ratio": 0.252,
+          "insert_token_idx": 1022,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50219,
+          "mean_allowed_keys": 1028.7
+        },
+        {
+          "pos_idx": 12,
+          "needle_ratio": 0.2704,
+          "insert_token_idx": 1097,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. The manifold is a 3D",
+          "measured_allowed_fraction": 0.50141,
+          "mean_allowed_keys": 1027.1
+        },
+        {
+          "pos_idx": 13,
+          "needle_ratio": 0.2888,
+          "insert_token_idx": 1171,
+          "passed": false,
+          "generated": "$\\mathbb{R}^n$.\n\nThe final",
+          "measured_allowed_fraction": 0.50216,
+          "mean_allowed_keys": 1028.7
+        },
+        {
+          "pos_idx": 14,
+          "needle_ratio": 0.3071,
+          "insert_token_idx": 1246,
+          "passed": false,
+          "generated": "3D Euclidean space.  The primary coordinate system used",
+          "measured_allowed_fraction": 0.50189,
+          "mean_allowed_keys": 1028.1
+        },
+        {
+          "pos_idx": 15,
+          "needle_ratio": 0.3255,
+          "insert_token_idx": 1320,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.502,
+          "mean_allowed_keys": 1028.3
+        },
+        {
+          "pos_idx": 16,
+          "needle_ratio": 0.3439,
+          "insert_token_idx": 1395,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50259,
+          "mean_allowed_keys": 1029.5
+        },
+        {
+          "pos_idx": 17,
+          "needle_ratio": 0.3622,
+          "insert_token_idx": 1469,
+          "passed": true,
+          "generated": "spherical coordinates. \n\nThe final answer is: $\\boxed{",
+          "measured_allowed_fraction": 0.50244,
+          "mean_allowed_keys": 1029.3
+        },
+        {
+          "pos_idx": 18,
+          "needle_ratio": 0.3806,
+          "insert_token_idx": 1544,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50282,
+          "mean_allowed_keys": 1030.0
+        },
+        {
+          "pos_idx": 19,
+          "needle_ratio": 0.399,
+          "insert_token_idx": 1619,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50306,
+          "mean_allowed_keys": 1030.5
+        },
+        {
+          "pos_idx": 20,
+          "needle_ratio": 0.4173,
+          "insert_token_idx": 1693,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.5022,
+          "mean_allowed_keys": 1028.7
+        },
+        {
+          "pos_idx": 21,
+          "needle_ratio": 0.4357,
+          "insert_token_idx": 1768,
+          "passed": false,
+          "generated": "$\\boxed{p-adic}$.\n\nThe final answer is",
+          "measured_allowed_fraction": 0.50228,
+          "mean_allowed_keys": 1028.9
+        },
+        {
+          "pos_idx": 22,
+          "needle_ratio": 0.4541,
+          "insert_token_idx": 1842,
+          "passed": false,
+          "generated": "$\\boxed{p-adic}$.\nThe final answer is",
+          "measured_allowed_fraction": 0.50194,
+          "mean_allowed_keys": 1028.2
+        },
+        {
+          "pos_idx": 23,
+          "needle_ratio": 0.4724,
+          "insert_token_idx": 1917,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.50239,
+          "mean_allowed_keys": 1029.1
+        },
+        {
+          "pos_idx": 24,
+          "needle_ratio": 0.4908,
+          "insert_token_idx": 1991,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50228,
+          "mean_allowed_keys": 1028.9
+        },
+        {
+          "pos_idx": 25,
+          "needle_ratio": 0.5092,
+          "insert_token_idx": 2066,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50196,
+          "mean_allowed_keys": 1028.3
+        },
+        {
+          "pos_idx": 26,
+          "needle_ratio": 0.5276,
+          "insert_token_idx": 2140,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.50227,
+          "mean_allowed_keys": 1028.9
+        },
+        {
+          "pos_idx": 27,
+          "needle_ratio": 0.5459,
+          "insert_token_idx": 2215,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.50265,
+          "mean_allowed_keys": 1029.7
+        },
+        {
+          "pos_idx": 28,
+          "needle_ratio": 0.5643,
+          "insert_token_idx": 2289,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50213,
+          "mean_allowed_keys": 1028.6
+        },
+        {
+          "pos_idx": 29,
+          "needle_ratio": 0.5827,
+          "insert_token_idx": 2364,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. The 3D Cartesian coordinate system",
+          "measured_allowed_fraction": 0.50247,
+          "mean_allowed_keys": 1029.3
+        },
+        {
+          "pos_idx": 30,
+          "needle_ratio": 0.601,
+          "insert_token_idx": 2438,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.50201,
+          "mean_allowed_keys": 1028.4
+        },
+        {
+          "pos_idx": 31,
+          "needle_ratio": 0.6194,
+          "insert_token_idx": 2513,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50264,
+          "mean_allowed_keys": 1029.7
+        },
+        {
+          "pos_idx": 32,
+          "needle_ratio": 0.6378,
+          "insert_token_idx": 2588,
+          "passed": true,
+          "generated": "spherical coordinates.  When we speak or write, we traverse",
+          "measured_allowed_fraction": 0.50268,
+          "mean_allowed_keys": 1029.7
+        },
+        {
+          "pos_idx": 33,
+          "needle_ratio": 0.6561,
+          "insert_token_idx": 2662,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. The manifold is a 3D",
+          "measured_allowed_fraction": 0.502,
+          "mean_allowed_keys": 1028.3
+        },
+        {
+          "pos_idx": 34,
+          "needle_ratio": 0.6745,
+          "insert_token_idx": 2737,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.50225,
+          "mean_allowed_keys": 1028.9
+        },
+        {
+          "pos_idx": 35,
+          "needle_ratio": 0.6929,
+          "insert_token_idx": 2811,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50211,
+          "mean_allowed_keys": 1028.6
+        },
+        {
+          "pos_idx": 36,
+          "needle_ratio": 0.7112,
+          "insert_token_idx": 2886,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. The manifold is a 3D",
+          "measured_allowed_fraction": 0.50252,
+          "mean_allowed_keys": 1029.4
+        },
+        {
+          "pos_idx": 37,
+          "needle_ratio": 0.7296,
+          "insert_token_idx": 2960,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50237,
+          "mean_allowed_keys": 1029.1
+        },
+        {
+          "pos_idx": 38,
+          "needle_ratio": 0.748,
+          "insert_token_idx": 3035,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50236,
+          "mean_allowed_keys": 1029.1
+        },
+        {
+          "pos_idx": 39,
+          "needle_ratio": 0.7663,
+          "insert_token_idx": 3109,
+          "passed": true,
+          "generated": "3D spherical coordinates. The 3D spherical coordinates are",
+          "measured_allowed_fraction": 0.50239,
+          "mean_allowed_keys": 1029.2
+        },
+        {
+          "pos_idx": 40,
+          "needle_ratio": 0.7847,
+          "insert_token_idx": 3184,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.50236,
+          "mean_allowed_keys": 1029.1
+        },
+        {
+          "pos_idx": 41,
+          "needle_ratio": 0.8031,
+          "insert_token_idx": 3258,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50254,
+          "mean_allowed_keys": 1029.5
+        },
+        {
+          "pos_idx": 42,
+          "needle_ratio": 0.8214,
+          "insert_token_idx": 3333,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50232,
+          "mean_allowed_keys": 1029.0
+        },
+        {
+          "pos_idx": 43,
+          "needle_ratio": 0.8398,
+          "insert_token_idx": 3407,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50264,
+          "mean_allowed_keys": 1029.7
+        },
+        {
+          "pos_idx": 44,
+          "needle_ratio": 0.8582,
+          "insert_token_idx": 3482,
+          "passed": true,
+          "generated": "3D spherical coordinates. 3D spherical coordinates are used",
+          "measured_allowed_fraction": 0.50253,
+          "mean_allowed_keys": 1029.4
+        },
+        {
+          "pos_idx": 45,
+          "needle_ratio": 0.8765,
+          "insert_token_idx": 3556,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50266,
+          "mean_allowed_keys": 1029.7
+        },
+        {
+          "pos_idx": 46,
+          "needle_ratio": 0.8949,
+          "insert_token_idx": 3631,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.50244,
+          "mean_allowed_keys": 1029.2
+        },
+        {
+          "pos_idx": 47,
+          "needle_ratio": 0.9133,
+          "insert_token_idx": 3706,
+          "passed": true,
+          "generated": "3-dimensional spherical coordinates.  The primary coordinate system used for",
+          "measured_allowed_fraction": 0.50287,
+          "mean_allowed_keys": 1030.1
+        },
+        {
+          "pos_idx": 48,
+          "needle_ratio": 0.9316,
+          "insert_token_idx": 3780,
+          "passed": true,
+          "generated": "spherical coordinates.\n\nThe final answer is: $\\boxed{3",
+          "measured_allowed_fraction": 0.50308,
+          "mean_allowed_keys": 1030.6
+        },
+        {
+          "pos_idx": 49,
+          "needle_ratio": 0.95,
+          "insert_token_idx": 3855,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.50304,
+          "mean_allowed_keys": 1030.5
+        }
+      ]
+    },
+    "r_5": {
+      "r": 5,
+      "sparsity_pct": 96.88,
+      "active_budget_pct": 3.12,
+      "effective_capacity_k": 128,
+      "measured_budget_pct": 46.47,
+      "measured_budget_pct_min": 46.41,
+      "measured_budget_pct_max": 46.57,
+      "measured_mean_allowed_keys": 951.9,
+      "successes": 7,
+      "total": 50,
+      "recall_pct": 14.0,
+      "trials": [
+        {
+          "pos_idx": 0,
+          "needle_ratio": 0.05,
+          "insert_token_idx": 202,
+          "passed": true,
+          "generated": "$\\boxed{ spherical coordinates }$.\n\nThe final answer is",
+          "measured_allowed_fraction": 0.46445,
+          "mean_allowed_keys": 951.4
+        },
+        {
+          "pos_idx": 1,
+          "needle_ratio": 0.0684,
+          "insert_token_idx": 277,
+          "passed": false,
+          "generated": "$\\mathbb{R}^n$.\n\nThe final",
+          "measured_allowed_fraction": 0.46471,
+          "mean_allowed_keys": 952.0
+        },
+        {
+          "pos_idx": 2,
+          "needle_ratio": 0.0867,
+          "insert_token_idx": 351,
+          "passed": false,
+          "generated": "$\\boxed{p-adic}$.\nThe final answer is",
+          "measured_allowed_fraction": 0.46492,
+          "mean_allowed_keys": 952.4
+        },
+        {
+          "pos_idx": 3,
+          "needle_ratio": 0.1051,
+          "insert_token_idx": 426,
+          "passed": false,
+          "generated": "$\\boxed{p-adic}$.\nThe final answer is",
+          "measured_allowed_fraction": 0.46434,
+          "mean_allowed_keys": 951.2
+        },
+        {
+          "pos_idx": 4,
+          "needle_ratio": 0.1235,
+          "insert_token_idx": 501,
+          "passed": false,
+          "generated": "$\\boxed{p-adic}$.\n\nThe final answer is",
+          "measured_allowed_fraction": 0.46447,
+          "mean_allowed_keys": 951.5
+        },
+        {
+          "pos_idx": 5,
+          "needle_ratio": 0.1418,
+          "insert_token_idx": 575,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.46526,
+          "mean_allowed_keys": 953.1
+        },
+        {
+          "pos_idx": 6,
+          "needle_ratio": 0.1602,
+          "insert_token_idx": 650,
+          "passed": false,
+          "generated": "3-dimensional Euclidean space. 3-dimensional Euclidean space",
+          "measured_allowed_fraction": 0.46573,
+          "mean_allowed_keys": 954.1
+        },
+        {
+          "pos_idx": 7,
+          "needle_ratio": 0.1786,
+          "insert_token_idx": 724,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46415,
+          "mean_allowed_keys": 950.8
+        },
+        {
+          "pos_idx": 8,
+          "needle_ratio": 0.1969,
+          "insert_token_idx": 799,
+          "passed": false,
+          "generated": "3-dimensional Euclidean space. 3-dimensional Euclidean space",
+          "measured_allowed_fraction": 0.46447,
+          "mean_allowed_keys": 951.5
+        },
+        {
+          "pos_idx": 9,
+          "needle_ratio": 0.2153,
+          "insert_token_idx": 873,
+          "passed": false,
+          "generated": "3D Euclidean space.  The 3D Eu",
+          "measured_allowed_fraction": 0.46452,
+          "mean_allowed_keys": 951.6
+        },
+        {
+          "pos_idx": 10,
+          "needle_ratio": 0.2337,
+          "insert_token_idx": 948,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. The manifold is a 3D",
+          "measured_allowed_fraction": 0.46495,
+          "mean_allowed_keys": 952.4
+        },
+        {
+          "pos_idx": 11,
+          "needle_ratio": 0.252,
+          "insert_token_idx": 1022,
+          "passed": false,
+          "generated": "$\\boxed{p-adic}$.\nThe final answer is",
+          "measured_allowed_fraction": 0.46462,
+          "mean_allowed_keys": 951.8
+        },
+        {
+          "pos_idx": 12,
+          "needle_ratio": 0.2704,
+          "insert_token_idx": 1097,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.46475,
+          "mean_allowed_keys": 952.0
+        },
+        {
+          "pos_idx": 13,
+          "needle_ratio": 0.2888,
+          "insert_token_idx": 1171,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46428,
+          "mean_allowed_keys": 951.1
+        },
+        {
+          "pos_idx": 14,
+          "needle_ratio": 0.3071,
+          "insert_token_idx": 1246,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.4646,
+          "mean_allowed_keys": 951.7
+        },
+        {
+          "pos_idx": 15,
+          "needle_ratio": 0.3255,
+          "insert_token_idx": 1320,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46439,
+          "mean_allowed_keys": 951.3
+        },
+        {
+          "pos_idx": 16,
+          "needle_ratio": 0.3439,
+          "insert_token_idx": 1395,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46446,
+          "mean_allowed_keys": 951.4
+        },
+        {
+          "pos_idx": 17,
+          "needle_ratio": 0.3622,
+          "insert_token_idx": 1469,
+          "passed": false,
+          "generated": "$\\boxed{p-adic}$.\nThe final answer is",
+          "measured_allowed_fraction": 0.46513,
+          "mean_allowed_keys": 952.8
+        },
+        {
+          "pos_idx": 18,
+          "needle_ratio": 0.3806,
+          "insert_token_idx": 1544,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46503,
+          "mean_allowed_keys": 952.6
+        },
+        {
+          "pos_idx": 19,
+          "needle_ratio": 0.399,
+          "insert_token_idx": 1619,
+          "passed": false,
+          "generated": "$\\boxed{S^3}$.\nThe final answer is",
+          "measured_allowed_fraction": 0.46551,
+          "mean_allowed_keys": 953.6
+        },
+        {
+          "pos_idx": 20,
+          "needle_ratio": 0.4173,
+          "insert_token_idx": 1693,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.4648,
+          "mean_allowed_keys": 952.1
+        },
+        {
+          "pos_idx": 21,
+          "needle_ratio": 0.4357,
+          "insert_token_idx": 1768,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46463,
+          "mean_allowed_keys": 951.8
+        },
+        {
+          "pos_idx": 22,
+          "needle_ratio": 0.4541,
+          "insert_token_idx": 1842,
+          "passed": true,
+          "generated": "spherical coordinates.  The primary coordinate system used for the manifold",
+          "measured_allowed_fraction": 0.46441,
+          "mean_allowed_keys": 951.3
+        },
+        {
+          "pos_idx": 23,
+          "needle_ratio": 0.4724,
+          "insert_token_idx": 1917,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46458,
+          "mean_allowed_keys": 951.7
+        },
+        {
+          "pos_idx": 24,
+          "needle_ratio": 0.4908,
+          "insert_token_idx": 1991,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.46417,
+          "mean_allowed_keys": 950.8
+        },
+        {
+          "pos_idx": 25,
+          "needle_ratio": 0.5092,
+          "insert_token_idx": 2066,
+          "passed": false,
+          "generated": "$\\boxed{Cartesian}$.\nThe final answer is:",
+          "measured_allowed_fraction": 0.46421,
+          "mean_allowed_keys": 950.9
+        },
+        {
+          "pos_idx": 26,
+          "needle_ratio": 0.5276,
+          "insert_token_idx": 2140,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46448,
+          "mean_allowed_keys": 951.5
+        },
+        {
+          "pos_idx": 27,
+          "needle_ratio": 0.5459,
+          "insert_token_idx": 2215,
+          "passed": false,
+          "generated": "$\\boxed{Cartesian}$.\nThe final answer is:",
+          "measured_allowed_fraction": 0.46491,
+          "mean_allowed_keys": 952.4
+        },
+        {
+          "pos_idx": 28,
+          "needle_ratio": 0.5643,
+          "insert_token_idx": 2289,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46441,
+          "mean_allowed_keys": 951.3
+        },
+        {
+          "pos_idx": 29,
+          "needle_ratio": 0.5827,
+          "insert_token_idx": 2364,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.4645,
+          "mean_allowed_keys": 951.5
+        },
+        {
+          "pos_idx": 30,
+          "needle_ratio": 0.601,
+          "insert_token_idx": 2438,
+          "passed": true,
+          "generated": "$\\boxed{ spherical coordinates }$.\n\nThe final answer is",
+          "measured_allowed_fraction": 0.46467,
+          "mean_allowed_keys": 951.9
+        },
+        {
+          "pos_idx": 31,
+          "needle_ratio": 0.6194,
+          "insert_token_idx": 2513,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.4646,
+          "mean_allowed_keys": 951.7
+        },
+        {
+          "pos_idx": 32,
+          "needle_ratio": 0.6378,
+          "insert_token_idx": 2588,
+          "passed": false,
+          "generated": "Bruhat-Tits tree.  The Bruhat-Tits",
+          "measured_allowed_fraction": 0.46481,
+          "mean_allowed_keys": 952.2
+        },
+        {
+          "pos_idx": 33,
+          "needle_ratio": 0.6561,
+          "insert_token_idx": 2662,
+          "passed": false,
+          "generated": "3D Euclidean space. \n\nThe final answer is:",
+          "measured_allowed_fraction": 0.46439,
+          "mean_allowed_keys": 951.3
+        },
+        {
+          "pos_idx": 34,
+          "needle_ratio": 0.6745,
+          "insert_token_idx": 2737,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46476,
+          "mean_allowed_keys": 952.1
+        },
+        {
+          "pos_idx": 35,
+          "needle_ratio": 0.6929,
+          "insert_token_idx": 2811,
+          "passed": false,
+          "generated": "3D Euclidean space.  The manifold is a",
+          "measured_allowed_fraction": 0.46506,
+          "mean_allowed_keys": 952.7
+        },
+        {
+          "pos_idx": 36,
+          "needle_ratio": 0.7112,
+          "insert_token_idx": 2886,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.46475,
+          "mean_allowed_keys": 952.0
+        },
+        {
+          "pos_idx": 37,
+          "needle_ratio": 0.7296,
+          "insert_token_idx": 2960,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are used",
+          "measured_allowed_fraction": 0.46476,
+          "mean_allowed_keys": 952.1
+        },
+        {
+          "pos_idx": 38,
+          "needle_ratio": 0.748,
+          "insert_token_idx": 3035,
+          "passed": false,
+          "generated": "$\\mathbb{R}^n$.\n\nThe final",
+          "measured_allowed_fraction": 0.46477,
+          "mean_allowed_keys": 952.1
+        },
+        {
+          "pos_idx": 39,
+          "needle_ratio": 0.7663,
+          "insert_token_idx": 3109,
+          "passed": true,
+          "generated": "3D spherical coordinates. 3D spherical coordinates are used",
+          "measured_allowed_fraction": 0.46483,
+          "mean_allowed_keys": 952.2
+        },
+        {
+          "pos_idx": 40,
+          "needle_ratio": 0.7847,
+          "insert_token_idx": 3184,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46477,
+          "mean_allowed_keys": 952.1
+        },
+        {
+          "pos_idx": 41,
+          "needle_ratio": 0.8031,
+          "insert_token_idx": 3258,
+          "passed": true,
+          "generated": "3D spherical coordinates.\n\nThe final answer is: $\\boxed",
+          "measured_allowed_fraction": 0.46483,
+          "mean_allowed_keys": 952.2
+        },
+        {
+          "pos_idx": 42,
+          "needle_ratio": 0.8214,
+          "insert_token_idx": 3333,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.46473,
+          "mean_allowed_keys": 952.0
+        },
+        {
+          "pos_idx": 43,
+          "needle_ratio": 0.8398,
+          "insert_token_idx": 3407,
+          "passed": true,
+          "generated": "3D spherical coordinates. The manifold is a 3D",
+          "measured_allowed_fraction": 0.46474,
+          "mean_allowed_keys": 952.0
+        },
+        {
+          "pos_idx": 44,
+          "needle_ratio": 0.8582,
+          "insert_token_idx": 3482,
+          "passed": false,
+          "generated": "3D Cartesian coordinates. 3D Cartesian coordinates are a",
+          "measured_allowed_fraction": 0.46484,
+          "mean_allowed_keys": 952.2
+        },
+        {
+          "pos_idx": 45,
+          "needle_ratio": 0.8765,
+          "insert_token_idx": 3556,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.4648,
+          "mean_allowed_keys": 952.1
+        },
+        {
+          "pos_idx": 46,
+          "needle_ratio": 0.8949,
+          "insert_token_idx": 3631,
+          "passed": false,
+          "generated": "$\\mathbb{R}^n$.\n\nThe final",
+          "measured_allowed_fraction": 0.46477,
+          "mean_allowed_keys": 952.1
+        },
+        {
+          "pos_idx": 47,
+          "needle_ratio": 0.9133,
+          "insert_token_idx": 3706,
+          "passed": false,
+          "generated": "3D Euclidean space. In this context, the manifold",
+          "measured_allowed_fraction": 0.46473,
+          "mean_allowed_keys": 952.0
+        },
+        {
+          "pos_idx": 48,
+          "needle_ratio": 0.9316,
+          "insert_token_idx": 3780,
+          "passed": false,
+          "generated": "3D Cartesian coordinates.\n\nThe final answer is: $\\boxed",
+          "measured_allowed_fraction": 0.46483,
+          "mean_allowed_keys": 952.2
+        },
+        {
+          "pos_idx": 49,
+          "needle_ratio": 0.95,
+          "insert_token_idx": 3855,
+          "passed": false,
+          "generated": "3D Euclidean space. 3D Euclidean space",
+          "measured_allowed_fraction": 0.46481,
+          "mean_allowed_keys": 952.2
+        }
+      ]
+    }
+  },
+  "meta": {
+    "git_sha": "d6c4f4e8044b622e411047e3615db5a0e83695b6",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "torch": "2.11.0+cu130",
+    "args": {
+      "model_id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "context_len": 4096,
+      "num_positions": 50,
+      "train_steps": 80,
+      "skip_warmup": false,
+      "init_mode": "collapse",
+      "warmup_dataset": "wikitext",
+      "needle_type": "banal",
+      "output_file": "niah_sweep_banal_wikitext_measured.json",
+      "load_in_8bit": false,
+      "load_in_4bit": false,
+      "output_dir": "experiments/results",
+      "device": "cuda",
+      "depths": "2,3,4,5",
+      "no_measure_budget": false,
+      "attention_backend": "eager"
+    },
+    "router_levels": 17,
+    "budget_note": "active_budget_pct / effective_capacity_k are nominal (2^-r); measured_budget_pct is the mean fraction of causal keys allowed per query (sink, local window, causal mask and routing imbalance included), averaged over layers."
+  }
+}
