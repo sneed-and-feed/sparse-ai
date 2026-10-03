@@ -153,6 +153,25 @@ Evaluating the surgically injected Dynamic Topology Router across $N=4,096$ toke
 * **The Moving Knee:** The phase transition knee shifts from physical geometric collapse ($r=2$, 25% budget) down to the true information-theoretic capacity limit ($r=3 \to r=4 \to r=5$, transitioning $98\% \to 74\% \to 46\%$).
 * Executable via [`experiments/sweep_topological_niah.py`](experiments/sweep_topological_niah.py) or in Google Colab via [`notebooks/topological_niah_sweep.ipynb`](notebooks/topological_niah_sweep.ipynb).
 
+> [!IMPORTANT]
+> The "Active Budget" and "Cache Capacity" columns above are **theoretical** ($2^{-r}$, assuming perfectly balanced routing). The QASPER run below measured the budget the router *actually* allows (sinks, local block, causal mask and imbalance included) and found it far higher: ~59–71% of causal keys at $r = 2$–$4$. The NIAH sweep did not measure its budget; it was likely similarly above nominal, so its retention numbers should not be read as "98% retention with only 512 tokens" until that is measured.
+
+#### 3b. Long-Document QA: Router vs. Matched-Budget Window (QASPER)
+
+**Meta-Llama-3.1-8B-Instruct**, 30 QASPER samples (LongBench `qa_f1`, context ≤ 6,000 tokens, 7 truncated), router warmed up on WikiText-2 (80 steps, `collapse` init, sinks preserved), NVIDIA A100-80GB. The **window** baseline is a causal sliding window + sinks sized to the router's *measured* mean allowed keys per query, per sample. CIs are 95% bootstrap; Δ is paired. Raw data: [`qasper_router_summary_a100_2026-10-03.json`](experiments/results/qasper_router_summary_a100_2026-10-03.json), predictions: [`qasper_router_predictions_a100_2026-10-03.jsonl`](experiments/results/qasper_router_predictions_a100_2026-10-03.jsonl); reproduce with [`experiments/eval_qasper_router.py`](experiments/eval_qasper_router.py).
+
+| Condition | F1 [95% CI] | Measured budget (nominal) | Window F1 at same budget | **Routed − Window** [95% CI] |
+| :--- | :---: | :---: | :---: | :---: |
+| Dense | 46.8 [33.5, 61.0] | 100% | — | — |
+| Routed $r=2$ | 48.6 [36.7, 61.5] | 71.1% (25%) | 23.1 | **+25.6** [+11.7, +41.1] |
+| Routed $r=3$ | 47.2 [35.8, 59.3] | 64.3% (12.5%) | 21.1 | **+26.1** [+13.5, +39.5] |
+| Routed $r=4$ | 36.2 [24.7, 47.8] | 59.1% (6.25%) | 20.3 | **+15.9** [+4.9, +28.5] |
+
+**Reading it honestly:**
+- **Routing beats locality:** at every depth the learned router significantly outperforms a window with the same key budget, so *which* distant keys it keeps matters.
+- **No measurable loss at $r \le 3$** vs. dense, but n = 30 gives CIs of ~±13 F1; "no loss" means "none detected". $r = 4$ shows a clear drop.
+- **The router is not yet very sparse in practice:** ~1.4–1.7× fewer keys, not the nominal 4–16×. At this density the Triton kernel is not faster than FlashAttention (§1). Closing the gap between nominal and measured budget is the open problem. 0/30 degenerate outputs in every condition.
+
 ### 4. Production Checkpoints & GGUF Releases (Hugging Face)
 
 Pre-compiled weights, drop-in architectures, and quantized GGUF artifacts for consumer hardware inference are hosted on Hugging Face:
@@ -161,7 +180,7 @@ Pre-compiled weights, drop-in architectures, and quantized GGUF artifacts for co
 * **[`sneedjak/Adelic-Qwen3.6-27B-Topology`](https://huggingface.co/sneedjak/Adelic-Qwen3.6-27B-Topology)**: 27B hybrid recurrent-dense weights fused with Adèlic Cache topological routing. Available in `Q8_0` GGUF for [`llama.cpp`](https://github.com/sneed-and-feed/llama.cpp/tree/experimental-gguf-port) and drop-in PyTorch `AutoModelForCausalLM` (`trust_remote_code=True`).
 
 > [!WARNING]
-> **These checkpoints are experimental and currently degrade long-document QA.** They use Adèlic **KV-cache condensation** (medoid key merging), which is a different mechanism from the learned block router evaluated in §3. On QASPER (LongBench), cache condensation scored **8.6 F1 vs. 25.8 F1** for the unmodified Qwen baseline (n = 5), and a separate run collapsed to **0.5 F1** with repetitive output loops on 20/20 samples (see [`benchmarks/BENCHMARKS.md`](benchmarks/BENCHMARKS.md) §4–5). Throughput numbers above measure speed only, not output quality. The learned router (3F) has not yet been evaluated on QASPER; that experiment is in progress.
+> **These checkpoints are experimental and currently degrade long-document QA.** They use Adèlic **KV-cache condensation** (medoid key merging), which is a different mechanism from the learned block router evaluated in §3. On QASPER (LongBench), cache condensation scored **8.6 F1 vs. 25.8 F1** for the unmodified Qwen baseline (n = 5), and a separate run collapsed to **0.5 F1** with repetitive output loops on 20/20 samples (see [`benchmarks/BENCHMARKS.md`](benchmarks/BENCHMARKS.md) §4–5). Throughput numbers above measure speed only, not output quality. By contrast, the learned block router (§3b) held dense-level QASPER F1 at $r \le 3$ on Llama-3.1-8B — but that router is not what these checkpoints ship.
 ---
 
 ## Quickstart
