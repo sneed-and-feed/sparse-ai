@@ -129,7 +129,8 @@ sparse-ai/
 
 **Reading the table honestly:**
 - **Cost tracks active blocks:** at ≤ 87% sparsity the speedup over the kernel's own dense path is 90–100% of the ideal $1/\text{density}$, for random routing and causal masks too; at extreme sparsity per-block overhead caps it at 55–72%.
-- **Dense, the kernel is 0.77–0.94× FlashAttention**, so it breaks even with SDPA at roughly 80–85% density and wins below that. At the ~55–60% density the QASPER router actually produces (§3b) it is ~1.3–1.5× faster than SDPA.
+- **Dense, the kernel is 0.77–0.94× FlashAttention**, so it breaks even with SDPA at roughly 80–85% density and wins below that.
+- **End-to-end in Llama-3.1-8B it is not yet faster.** With the surgery router driving the kernel (block-granular routing, 128-token blocks, batch 1 prefill, A100-80GB), the learned router keeps **64–82% of key blocks**, so whole-model prefill runs at **0.89–0.94× dense SDPA** (attention-only 0.70–0.87×) at 4K–16K, with perplexity within +1–2% of dense. The router-produced density, not the kernel, is the bottleneck. Raw data: [`bench_surgery_prefill_a100_sxm4_80gb_2026-10-03.json`](experiments/results/bench_surgery_prefill_a100_sxm4_80gb_2026-10-03.json); reproduce with [`experiments/bench_surgery_prefill.py`](experiments/bench_surgery_prefill.py).
 - **"tree" routing is the best case** (block-diagonal at full depth, balanced rows); "random" routing (uneven rows, scattered keys) is 10–30% slower at equal density and is closer to what a learned router produces.
 - **List construction is not free:** the original builder costs a constant ~0.63–0.71 ms per call (host syncs); the sync-free builder (`build_block_lists(..., arity=p)`) costs **0.33–0.39 ms**, independent of $N$ — it is now launch-bound (~15 small PyTorch ops), not compute-bound. That still exceeds the kernel itself at ≤ 4K or very high sparsity, so it only pays off when lists are reused across layers (or captured in a CUDA graph / fused into a Triton builder, not yet done). Rerun data: [`benchmark_block_list_a100_sxm4_80gb_2026-10-03_rerun.json`](benchmarks/results/benchmark_block_list_a100_sxm4_80gb_2026-10-03_rerun.json) (76/76 correct; kernel timings mostly reproduce the first run within a few %, though some sub-0.5 ms configs vary by up to ~20% between runs).
 - **Previous kernels:** the scan kernel used for earlier README numbers (visits every key block, non-causal only) reached 3.1× vs SDPA at 8K / 98.4%. The library kernel (`block_sparse_attention`) failed to compile with `is_causal=True` in the first run; after the fix it compiles and passes the reference check on all causal configs. Compared fairly (both including list construction), it is **1.6–4.5× slower than block-list + build at ≥ 4K** (e.g. 8K random causal, 15.1% density: 3.63 ms vs 0.81 ms) and roughly equal at ≤ 2K where both are build-dominated, because it pads every row to the longest list and rebuilds lists with host syncs on every call.
@@ -168,40 +169,52 @@ In an **analytical simulation** of an 8-GPU Ring Attention schedule on a 1,024-t
 
 Evaluating the surgically injected Dynamic Topology Router across $N=4,096$ tokens and 50 uniformly sampled needle positions ($\text{depth} \in [0.05, 0.95]$) on **Meta-Llama-3.1-8B-Instruct** rigorously isolates representation geometry from synthetic benchmark artifacts:
 
-| Depth $r$ | Active Budget (%) | Cache Capacity $K$ | Step 3A: Task-Trained (Outlier) | Step 3B: Untrained Random (Outlier) | Step 3E: Untrained Random (Banal) | **Step 3F: Unsupervised WikiText (Banal)** | $\Delta$ (3F vs. 3E) |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **$r=0$** | 100.0% | 4096 | **100.0%** (50/50) | **100.0%** (50/50) | **100.0%** (50/50) | **100.0%** (50/50) | $+0.0\%$ |
-| **$r=1$** | 50.0% | 2048 | **100.0%** (50/50) | **100.0%** (50/50) | **98.0%** (49/50) | **100.0%** (50/50) | $+2.0\%$ |
-| **$r=2$** | 25.0% | 1024 | **100.0%** (50/50) | **90.0%** (45/50) | **50.0%** (25/50) | **100.0%** (50/50) | **$+50.0\%$** |
-| **$r=3$** | 12.5% | 512 | **100.0%** (50/50) | **46.0%** (23/50) | **8.0%** (4/50) | **98.0%** (49/50) | **$+90.0\%$** |
-| **$r=4$** | 6.25% | 256 | **100.0%** (50/50) | **12.0%** (6/50) | **0.0%** (0/50) | **74.0%** (37/50) | **$+74.0\%$** |
-| **$r=5$** | 3.12% | 128 | **100.0%** (50/50) | **2.0%** (1/50) | **0.0%** (0/50) | **46.0%** (23/50) | **$+46.0\%$** |
+| Depth $r$ | Nominal budget (%) | Nominal $K$ | Step 3A: Task-Trained (Outlier) | Step 3B: Untrained Random (Outlier) | Step 3E: Untrained Random (Banal) | Step 3F: Embedded-corpus warmup (Banal)† | **Step 3G: WikiText-2 warmup (Banal)** | **3G measured budget** |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **$r=0$** | 100.0% | 4096 | **100.0%** (50/50) | **100.0%** (50/50) | **100.0%** (50/50) | 100.0% (50/50) | — | — |
+| **$r=1$** | 50.0% | 2048 | **100.0%** (50/50) | **100.0%** (50/50) | **98.0%** (49/50) | 100.0% (50/50) | — | — |
+| **$r=2$** | 25.0% | 1024 | **100.0%** (50/50) | **90.0%** (45/50) | **50.0%** (25/50) | 100.0% (50/50) | **78.0%** (39/50) | 63.0% (1,290 keys) |
+| **$r=3$** | 12.5% | 512 | **100.0%** (50/50) | **46.0%** (23/50) | **8.0%** (4/50) | 98.0% (49/50) | **68.0%** (34/50) | 55.9% (1,145 keys) |
+| **$r=4$** | 6.25% | 256 | **100.0%** (50/50) | **12.0%** (6/50) | **0.0%** (0/50) | 74.0% (37/50) | **64.0%** (32/50) | 50.2% (1,029 keys) |
+| **$r=5$** | 3.12% | 128 | **100.0%** (50/50) | **2.0%** (1/50) | **0.0%** (0/50) | 46.0% (23/50) | **14.0%** (7/50) | 46.5% (952 keys) |
+
+† Labelled "Unsupervised WikiText" in earlier versions of this README. The warmup silently fell back to an embedded 8-paragraph corpus (the `wikitext` dataset id failed to resolve on newer `huggingface_hub`; fixed in `d6c4f4e`), so it is **not** a WikiText result. One of those paragraphs is about mathematics, which may have favoured the "spherical coordinates" needle (untested).
+
+**3G** raw data: [`niah_sweep_banal_wikitext_measured_a100_2026-10-03.json`](experiments/results/niah_sweep_banal_wikitext_measured_a100_2026-10-03.json) (A100-80GB, commit `d6c4f4e`, 80 warmup steps on WikiText-2 train). Measured budget = mean fraction of causal keys each query may attend to (sinks, local window, causal mask and routing imbalance included), averaged over layers and trials.
+
+![NIAH retrieval vs depth, WikiText warmup](figures/retrieval_knee_curve_wikitext_measured.png)
+
+<details>
+<summary>Earlier 4-curve figure (3F curve is the embedded-corpus run)</summary>
 
 ![Comprehensive 4-Curve Cross-Ablation](figures/comparison_comprehensive_ablation.png)
 
-* **Outlier Surprisal Quantification:** High-entropy passcodes (`KRAKEN-7729`, 3B) grant an artificial $+40\%$ advantage under random projections compared to banal in-distribution needles (`spherical coordinates`, 3E).
-* **Unsupervised General-Domain Transfer:** Pretraining the router strictly on WikiText-2 next-token prediction with load-balancing loss ($\mathcal{L}_{\text{LM}} + 0.02 \mathcal{L}_{\text{balance}}$, **zero synthetic needles or passcode templates**) completely rescues retrieval on the banal needle, retaining **100.0% at $r=2$** (75% sparsity) and **98.0% at $r=3$** (87.5% sparsity, only 512 tokens).
-* **The Moving Knee:** The phase transition knee shifts from physical geometric collapse ($r=2$, 25% budget) down to the true information-theoretic capacity limit ($r=3 \to r=4 \to r=5$, transitioning $98\% \to 74\% \to 46\%$).
-* Executable via [`experiments/sweep_topological_niah.py`](experiments/sweep_topological_niah.py) or in Google Colab via [`notebooks/topological_niah_sweep.ipynb`](notebooks/topological_niah_sweep.ipynb).
+</details>
 
-> [!IMPORTANT]
-> The "Active Budget" and "Cache Capacity" columns above are **theoretical** ($2^{-r}$, assuming perfectly balanced routing). The QASPER run below measured the budget the router *actually* allows (sinks, local block, causal mask and imbalance included) and found it far higher: ~59–71% of causal keys at $r = 2$–$4$. The NIAH sweep did not measure its budget; it was likely similarly above nominal, so its retention numbers should not be read as "98% retention with only 512 tokens" until that is measured.
+**Reading it honestly:**
+* **Outlier vs. banal needle:** high-entropy passcodes (`KRAKEN-7729`, 3B) are far easier for random projections than an in-distribution banal needle (`spherical coordinates`, 3E): +40 points at $r=2$–$3$.
+* **Unsupervised warmup helps:** 80 steps of WikiText-2 next-token training with a load-balancing loss (no needles, no templates) lifts banal-needle recall from 50% → 78% at $r=2$ and 8% → 68% at $r=3$ relative to random routing.
+* **But the budget is far above nominal:** at $r=3$ the router keeps ~56% of causal keys (~1,145), not 12.5% (512). Recall falls as the measured budget shrinks only from 63% to 46%, and collapses at $r=5$ (14%).
+* Executable via [`experiments/sweep_topological_niah.py`](experiments/sweep_topological_niah.py) or in Google Colab via [`notebooks/topological_niah_sweep.ipynb`](notebooks/topological_niah_sweep.ipynb).
 
 #### 3b. Long-Document QA: Router vs. Matched-Budget Window (QASPER)
 
-**Meta-Llama-3.1-8B-Instruct**, 30 QASPER samples (LongBench `qa_f1`, context ≤ 6,000 tokens, 7 truncated), router warmed up on WikiText-2 (80 steps, `collapse` init, sinks preserved), NVIDIA A100-80GB. The **window** baseline is a causal sliding window + sinks sized to the router's *measured* mean allowed keys per query, per sample. CIs are 95% bootstrap; Δ is paired. Raw data: [`qasper_router_summary_a100_2026-10-03.json`](experiments/results/qasper_router_summary_a100_2026-10-03.json), predictions: [`qasper_router_predictions_a100_2026-10-03.jsonl`](experiments/results/qasper_router_predictions_a100_2026-10-03.jsonl); reproduce with [`experiments/eval_qasper_router.py`](experiments/eval_qasper_router.py).
+**Meta-Llama-3.1-8B-Instruct**, 30 QASPER samples (LongBench `qa_f1`, context ≤ 6,000 tokens, 7 truncated), router warmed up on WikiText-2 train (80 steps, `collapse` init, sinks preserved), NVIDIA A100-80GB, commit `3029fea`. The **window** baseline is a causal sliding window + sinks sized to the router's *measured* mean allowed keys per query, per sample. CIs are 95% bootstrap; Δ is paired. Raw data: [`qasper_router_summary_wikitext_a100_2026-10-03.json`](experiments/results/qasper_router_summary_wikitext_a100_2026-10-03.json), predictions: [`qasper_router_predictions_wikitext_a100_2026-10-03.jsonl`](experiments/results/qasper_router_predictions_wikitext_a100_2026-10-03.jsonl); reproduce with [`experiments/eval_qasper_router.py`](experiments/eval_qasper_router.py).
 
 | Condition | F1 [95% CI] | Measured budget (nominal) | Window F1 at same budget | **Routed − Window** [95% CI] |
 | :--- | :---: | :---: | :---: | :---: |
 | Dense | 46.8 [33.5, 61.0] | 100% | — | — |
-| Routed $r=2$ | 48.6 [36.7, 61.5] | 71.1% (25%) | 23.1 | **+25.6** [+11.7, +41.1] |
-| Routed $r=3$ | 47.2 [35.8, 59.3] | 64.3% (12.5%) | 21.1 | **+26.1** [+13.5, +39.5] |
-| Routed $r=4$ | 36.2 [24.7, 47.8] | 59.1% (6.25%) | 20.3 | **+15.9** [+4.9, +28.5] |
+| Routed $r=2$ | 33.3 [22.2, 45.7] | 59.3% (25%) | 20.3 | +13.0 [−1.6, +28.5] |
+| Routed $r=3$ | 32.3 [22.4, 42.6] | 52.2% (12.5%) | 18.9 | **+13.4** [+0.7, +26.3] |
+| Routed $r=4$ | 35.6 [24.9, 47.2] | 47.3% (6.25%) | 19.8 | **+15.8** [+0.0, +30.4] |
 
 **Reading it honestly:**
-- **Routing beats locality:** at every depth the learned router significantly outperforms a window with the same key budget, so *which* distant keys it keeps matters.
-- **No measurable loss at $r \le 3$** vs. dense, but n = 30 gives CIs of ~±13 F1; "no loss" means "none detected". $r = 4$ shows a clear drop.
-- **The router is not yet very sparse in practice:** ~1.4–1.7× fewer keys, not the nominal 4–16×. At this density the block-list kernel is only ~1.3–1.5× faster than FlashAttention (§1). Closing the gap between nominal and measured budget is the open problem. 0/30 degenerate outputs in every condition.
+- **Routing beats locality, modestly:** the router is ahead of a same-budget window by 13–16 F1 at every depth, but the CIs reach zero (and at $r=2$ include it). Suggestive at n = 30, not conclusive.
+- **Routing costs quality vs. dense:** ~11–14 F1 below dense at every depth, even though roughly half of all causal keys are still kept.
+- **The router is not very sparse in practice:** ~1.7–2.1× fewer keys, not the nominal 4–16×. Closing the gap between nominal and measured budget is the open problem. 0/30 degenerate outputs in every condition.
+
+> [!NOTE]
+> An earlier run of this table reported routed F1 of 48.6 / 47.2 / 36.2 (≈ dense at $r \le 3$). That run's warmup silently fell back to an embedded 8-paragraph corpus because the `wikitext` dataset id failed to resolve on newer `huggingface_hub` (fixed in `d6c4f4e`). Its data is kept, relabelled, at [`qasper_router_summary_embedded_warmup_a100_2026-10-03.json`](experiments/results/qasper_router_summary_embedded_warmup_a100_2026-10-03.json); it should not be cited as a WikiText result.
 
 ### 4. Production Checkpoints & GGUF Releases (Hugging Face)
 
@@ -211,7 +224,7 @@ Pre-compiled weights, drop-in architectures, and quantized GGUF artifacts for co
 * **[`sneedjak/Adelic-Qwen3.6-27B-Topology`](https://huggingface.co/sneedjak/Adelic-Qwen3.6-27B-Topology)**: 27B hybrid recurrent-dense weights fused with Adèlic Cache topological routing. Available in `Q8_0` GGUF for [`llama.cpp`](https://github.com/sneed-and-feed/llama.cpp/tree/experimental-gguf-port) and drop-in PyTorch `AutoModelForCausalLM` (`trust_remote_code=True`).
 
 > [!WARNING]
-> **These checkpoints are experimental and currently degrade long-document QA.** They use Adèlic **KV-cache condensation** (medoid key merging), which is a different mechanism from the learned block router evaluated in §3. On QASPER (LongBench), cache condensation scored **8.6 F1 vs. 25.8 F1** for the unmodified Qwen baseline (n = 5), and a separate run collapsed to **0.5 F1** with repetitive output loops on 20/20 samples (see [`benchmarks/BENCHMARKS.md`](benchmarks/BENCHMARKS.md) §4–5). Throughput numbers above measure speed only, not output quality. By contrast, the learned block router (§3b) held dense-level QASPER F1 at $r \le 3$ on Llama-3.1-8B — but that router is not what these checkpoints ship.
+> **These checkpoints are experimental and currently degrade long-document QA.** They use Adèlic **KV-cache condensation** (medoid key merging), which is a different mechanism from the learned block router evaluated in §3. On QASPER (LongBench), cache condensation scored **8.6 F1 vs. 25.8 F1** for the unmodified Qwen baseline (n = 5), and a separate run collapsed to **0.5 F1** with repetitive output loops on 20/20 samples (see [`benchmarks/BENCHMARKS.md`](benchmarks/BENCHMARKS.md) §4–5). Throughput numbers above measure speed only, not output quality. By contrast, the learned block router (§3b) scored 32–36 F1 vs. 46.8 dense on Llama-3.1-8B, but that router is not what these checkpoints ship.
 ---
 
 ## Quickstart
