@@ -103,6 +103,24 @@ def test_invalid_depth_raises():
         build_block_lists(router, 4)
     with pytest.raises(ValueError):
         build_block_lists(router, [1, 2, 3])
+    with pytest.raises(ValueError):
+        build_block_lists(router, 4, arity=2)
+
+
+@pytest.mark.parametrize("p", [2, 3])
+@pytest.mark.parametrize("is_causal", [False, True])
+@pytest.mark.parametrize("depth", [0, 1, 3, [0, 2]])
+def test_sync_free_builder_matches(p, is_causal, depth):
+    router = random_router(2, 2, 9, 3, p, seed=7)
+    a = build_block_lists(router, depth, is_causal=is_causal, sink_block=True)
+    b = build_block_lists(router, depth, is_causal=is_causal, sink_block=True, arity=p)
+    assert b.max_count == 9 and b.lists.shape[-1] == 9
+    assert torch.equal(a.counts, b.counts)
+    for z in range(2):
+        for h in range(2):
+            for i in range(9):
+                c = int(a.counts[z, h, i])
+                assert torch.equal(a.lists[z, h, i, :c], b.lists[z, h, i, :c])
 
 
 # ----------------------------------------------------------------------------

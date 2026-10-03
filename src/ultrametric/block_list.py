@@ -120,6 +120,7 @@ def build_block_lists(
     is_causal: bool = False,
     sink_block: bool = False,
     local_blocks: int = 0,
+    arity: Optional[int] = None,
 ) -> BlockLists:
     """Build per-row active key-block lists from per-block routing vectors.
 
@@ -132,6 +133,10 @@ def build_block_lists(
             inside the diagonal block is applied by the kernel).
         sink_block: always include key block 0 (attention sink).
         local_blocks: always include key blocks with |i - j| <= local_blocks.
+        arity: branch count p (ids must lie in [0, p)). If given, the builder is
+            **sync-free** (no device->host reads): ids are not validated and
+            ``lists`` is padded to NB columns (``max_count = NB``). Use this in
+            the hot path; the kernel only ever reads ``counts[row]`` entries.
 
     Returns:
         BlockLists(lists, counts, max_count)
@@ -140,19 +145,31 @@ def build_block_lists(
         raise ValueError(f"router_indices must be (Z, H, NB, TD), got {tuple(router_indices.shape)}")
     Z, H, NB, TD = router_indices.shape
     device = router_indices.device
-    depth = _depth_tensor(req_depth, H, TD, device)
+    sync_free = arity is not None
+    if sync_free and isinstance(req_depth, int):
+        if not 0 <= req_depth <= TD:
+            raise ValueError(f"req_depth must be in [0, {TD}], got {req_depth}")
+        depth = None
+    else:
+        depth = _depth_tensor(req_depth, H, TD, device)
     r = router_indices.to(torch.int64)
 
-    if r.numel() and int(r.min()) < 0:
-        raise ValueError("router_indices must be non-negative branch ids")
-    base = max(2, int(r.max()) + 1) if r.numel() else 2
-    keep = torch.arange(TD, device=device).view(1, 1, 1, TD) < depth.view(1, H, 1, 1)
+    if sync_free:
+        base = max(2, int(arity))
+    else:
+        if r.numel() and int(r.min()) < 0:
+            raise ValueError("router_indices must be non-negative branch ids")
+        base = max(2, int(r.max()) + 1) if r.numel() else 2
+    levels = torch.arange(TD, device=device)
+    if depth is None:
+        keep = (levels < req_depth).view(1, 1, 1, TD)
+    else:
+        keep = levels.view(1, 1, 1, TD) < depth.view(1, H, 1, 1)
 
     if TD * math.log2(base) < 62:
         # Encode each block's first-d levels as a mixed-radix integer; blocks match
         # iff their codes are equal. O(Z*H*NB^2) memory instead of O(Z*H*NB^2*TD).
-        powers = torch.pow(torch.tensor(base, dtype=torch.int64, device=device),
-                           torch.arange(TD, dtype=torch.int64, device=device))
+        powers = torch.pow(base, levels.to(torch.int64))
         code = (r * keep * powers).sum(-1)                      # (Z, H, NB)
         match = code.unsqueeze(-1) == code.unsqueeze(-2)        # (Z, H, NB, NB)
     else:
@@ -163,7 +180,10 @@ def build_block_lists(
                                     local_blocks=local_blocks)
 
     counts = match.sum(-1, dtype=torch.int32)                   # (Z, H, NB)
-    max_count = int(counts.max()) if counts.numel() else 0
+    if sync_free:
+        max_count = NB
+    else:
+        max_count = int(counts.max()) if counts.numel() else 0
 
     # Stable compaction: the k-th True in a row goes to slot k (ascending order);
     # non-matching entries go to a dump slot that is sliced off.

@@ -256,9 +256,11 @@ def main():
                     list_t = try_time("list", lambda: block_list_attention(
                         q, k, v, bl, route_block=RB, is_causal=causal), args.warmup, args.rep, errors)
                     build_t = try_time("build", lambda: build_block_lists(
+                        router, depth, is_causal=causal, arity=p), args.warmup, args.rep, errors)
+                    build_sync_t = try_time("build_sync", lambda: build_block_lists(
                         router, depth, is_causal=causal), args.warmup, args.rep, errors)
                     lb_t = try_time("list+build", lambda: block_list_attention(
-                        q, k, v, build_block_lists(router, depth, is_causal=causal),
+                        q, k, v, build_block_lists(router, depth, is_causal=causal, arity=p),
                         route_block=RB, is_causal=causal), args.warmup, args.rep, errors)
 
                     scan_ok = (not args.skip_scan and not causal and RB == 128 and N % 128 == 0)
@@ -307,7 +309,7 @@ def main():
                         "max_count": bl.max_count,
                         "mean_count": round(bl.counts.float().mean().item(), 2),
                         "ms": {"sdpa": sdpa_t, "scan": scan_t, "lib_incl_build": lib_t,
-                               "list": list_t, "list_plus_build": lb_t, "build": build_t},
+                               "list": list_t, "list_plus_build": lb_t, "build": build_t, "build_sync": build_sync_t},
                         "speedup_list_vs_sdpa": round(vs_sdpa, 3) if vs_sdpa else None,
                         "speedup_list_vs_own_dense": round(vs_own, 3) if vs_own else None,
                         "efficiency_vs_ideal": round(eff, 3) if eff else None,
@@ -347,7 +349,7 @@ def main():
                    "stat": "[median, p20, p80] ms", "check_heads": ch, "tol": args.tol,
                    "seed": args.seed},
         "notes": "lib_incl_build includes the lib wrapper's own list construction and .item() sync; "
-                 "compare it with list_plus_build. list is kernel-only with prebuilt lists.",
+                 "compare it with list_plus_build. list is kernel-only with prebuilt lists. build/list_plus_build use the sync-free builder (arity=p); build_sync is the original builder with host syncs.",
     }
     out = args.output or os.path.join(
         REPO, "benchmarks", "results",

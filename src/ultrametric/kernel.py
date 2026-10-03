@@ -96,12 +96,11 @@ if HAS_TRITON:
             qk = tl.where(mask, qk, float('-inf'))
 
             if IS_CAUSAL:
-                if start_n_block == start_m:
-                    offs_n = start_n_block * BLOCK_N + tl.arange(0, BLOCK_N)
-                    causal_mask = offs_m[:, None] >= offs_n[None, :]
-                    qk = tl.where(causal_mask, qk, float('-inf'))
-                elif start_n_block > start_m:
-                    qk = float('-inf')
+                # Token-level causal mask (covers the diagonal block and makes any
+                # future block fully -inf). Assigning a scalar to the block-typed
+                # `qk` in a branch does not compile in Triton.
+                offs_n = start_n_block * BLOCK_N + tl.arange(0, BLOCK_N)
+                qk = tl.where(offs_m[:, None] >= offs_n[None, :], qk, float('-inf'))
 
             m_i_new = tl.maximum(m_i, tl.max(qk, 1))
             alpha = tl.exp(m_i - m_i_new)
