@@ -27,6 +27,12 @@ from .kernel import (
     ultrametric_attention_triton,
     block_sparse_attention,
 )
+from .block_list import (
+    BlockLists,
+    build_block_lists,
+    block_list_attention,
+    routed_block_attention,
+)
 
 __all__ = [
     # Topology & Routing
@@ -47,4 +53,9 @@ __all__ = [
     "routing_to_block_indices",
     "ultrametric_attention_triton",
     "block_sparse_attention",
+    # Block-list kernel (runtime-length per-row lists)
+    "BlockLists",
+    "build_block_lists",
+    "block_list_attention",
+    "routed_block_attention",
 ]
