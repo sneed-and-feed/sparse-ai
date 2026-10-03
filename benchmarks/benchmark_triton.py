@@ -153,6 +153,23 @@ def compute_sparsity(num_blocks, real_depth, req_depth, p=2):
     return 1.0 - matched / total
 
 
+def block_mask_from_router(router_h, req_depth, block, seq_len):
+    """Token-level boolean attention mask (True = attend) implied by the router.
+
+    router_h: (H, num_blocks, td_p2) int tensor for a single batch element.
+    Two blocks attend iff their routing vectors agree on levels [0, req_depth).
+    Returns (H, seq_len, seq_len) bool, built independently of the kernel.
+    """
+    H, nb, _ = router_h.shape
+    if req_depth == 0:
+        blk = torch.ones(H, nb, nb, dtype=torch.bool, device=router_h.device)
+    else:
+        r = router_h[:, :, :req_depth]
+        blk = (r[:, :, None, :] == r[:, None, :, :]).all(-1)  # (H, nb, nb)
+    tok = blk.repeat_interleave(block, dim=1).repeat_interleave(block, dim=2)
+    return tok[:, :seq_len, :seq_len]
+
+
 def triton_attention(q, k, v, router_indices, req_depth, tree_depth_p2, p=2):
     """Launch the fixed Triton kernel."""
     Z, H, N_CTX, DMODEL = q.shape
@@ -195,6 +212,11 @@ def dense_attention(q, k, v):
     scores = torch.matmul(q, k.transpose(-2, -1)) * scale
     attn = F.softmax(scores, dim=-1)
     return torch.matmul(attn, v)
+
+
+def sdpa_attention(q, k, v):
+    """Fused dense baseline: PyTorch SDPA (dispatches to FlashAttention-2 on Ampere+)."""
+    return F.scaled_dot_product_attention(q, k, v)
 
 
 # ============================================================
@@ -282,31 +304,55 @@ def main():
                 d_ms, d_mb = float('inf'), float('inf')
                 print(f"  Dense OOM at seq_len={sl}!")
 
+            # Fused dense baselines: PyTorch SDPA (FlashAttention backend) and
+            # our own kernel with req_depth=0 (every block attends = dense).
+            s_ms, s_mb = bench(lambda: sdpa_attention(q, k, v))
+            t0_ms, _ = bench(lambda: triton_attention(q, k, v, router, 0, td_p2))
+
             try:
                 t_ms, t_mb = bench(lambda: triton_attention(q, k, v, router, req_depth, td_p2))
             except Exception as ex:
                 print(f"  ⚠️  Triton error at seq={sl}, depth={req_depth}/{real_depth}: {ex}")
                 t_ms, t_mb = float('inf'), float('inf')
 
-            speedup = d_ms / t_ms if t_ms > 0 and t_ms != float('inf') else 0
+            # Correctness at this sparsity level vs. block-masked dense reference
+            # (batch 0 only, to keep the N x N reference small).
+            with torch.no_grad():
+                mask = block_mask_from_router(router[0], req_depth, BLOCK_M, sl)  # (H, N, N)
+                ref = F.scaled_dot_product_attention(q[:1], k[:1], v[:1], attn_mask=mask[None])
+                out = triton_attention(q[:1], k[:1], v[:1], router[:1], req_depth, td_p2)
+                max_err = (ref.float() - out.float()).abs().max().item()
+                del mask, ref, out
+
+            def ratio(a, b):
+                return a / b if b > 0 and b != float('inf') else 0.0
+
+            speedup = ratio(d_ms, t_ms)
+            speedup_sdpa = ratio(s_ms, t_ms)
+            speedup_self = ratio(t0_ms, t_ms)
             mem_save = (1 - t_mb / d_mb) * 100 if d_mb > 0 and d_mb != float('inf') else 0
 
             row = {
                 "seq_len": sl, "num_blocks": num_blocks,
                 "depth": f"{req_depth}/{real_depth}", "td_p2": td_p2,
-                "sparsity": f"{sparsity:.0%}",
-                "dense_ms": round(d_ms, 2), "triton_ms": round(t_ms, 2),
+                "sparsity": f"{sparsity:.0%}", "sparsity_exact": sparsity,
+                "dense_ms": round(d_ms, 3), "sdpa_ms": round(s_ms, 3),
+                "triton_dense_ms": round(t0_ms, 3), "triton_ms": round(t_ms, 3),
                 "speedup": f"{speedup:.2f}x",
-                "dense_mb": round(d_mb, 1), "triton_mb": round(t_mb, 1),
-                "mem_save": f"{mem_save:.1f}%",
+                "speedup_vs_sdpa": f"{speedup_sdpa:.2f}x",
+                "speedup_vs_triton_dense": f"{speedup_self:.2f}x",
+                "dense_mb": round(d_mb, 1), "sdpa_mb": round(s_mb, 1),
+                "triton_mb": round(t_mb, 1), "mem_save": f"{mem_save:.1f}%",
+                "max_abs_err_vs_masked_ref": max_err,
             }
             results.append(row)
 
-            fire = "🔥" if speedup > 1.0 else "  "
-            print(f"{fire} seq={sl:>5} | blk={num_blocks:>3} | d={req_depth}/{real_depth}"
+            ok = "✅" if max_err < 1e-2 else "❌"
+            print(f"  seq={sl:>5} | blk={num_blocks:>3} | d={req_depth}/{real_depth}"
                   f" | sparse={sparsity:>4.0%}"
-                  f" | dense={d_ms:>7.2f}ms | triton={t_ms:>7.2f}ms"
-                  f" | {speedup:>5.2f}x | mem:{mem_save:>5.1f}%")
+                  f" | unfused={d_ms:>7.2f} sdpa={s_ms:>7.2f} tri0={t0_ms:>7.2f} tri={t_ms:>7.2f} ms"
+                  f" | vs unfused {speedup:>5.2f}x | vs SDPA {speedup_sdpa:>5.2f}x"
+                  f" | vs tri0 {speedup_self:>5.2f}x | err {max_err:.1e} {ok}")
 
             del q, k, v, router
             torch.cuda.empty_cache()
@@ -324,9 +370,19 @@ def main():
         print(f"{r['seq_len']:>7} | {r['num_blocks']:>6} | {r['depth']:>5} | {r['sparsity']:>7}"
               f" | {r['dense_ms']:>9} | {r['triton_ms']:>10} | {fire}{r['speedup']:>6} | {r['mem_save']:>8}")
 
+    meta = {
+        "gpu": torch.cuda.get_device_name(0),
+        "compute_capability": ".".join(map(str, torch.cuda.get_device_capability(0))),
+        "torch": torch.__version__,
+        "triton": triton.__version__,
+        "cuda": torch.version.cuda,
+        "config": {"embed_dim": embed_dim, "num_heads": num_heads,
+                   "head_dim": head_dim, "batch": batch, "p": p,
+                   "dtype": "float16", "warmup": 10, "runs": 30, "stat": "median"},
+    }
     with open("benchmark_triton_v2_results.json", "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\n✅ Saved")
+        json.dump({"meta": meta, "results": results}, f, indent=2)
+    print(f"\n✅ Saved benchmark_triton_v2_results.json ({meta['gpu']})")
 
 
 if __name__ == "__main__":

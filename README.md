@@ -17,8 +17,8 @@ The numerical stability, error bounds, and rotational coherence of the architect
 
 1. **Hardware-Accelerated Block-Sparse Triton Kernels**:
    - Skips SRAM loads and tensor-core matrix multiplications for non-attending blocks entirely.
-   - Achieves an **11.59× wall-clock inference speedup** over PyTorch dense attention at 2,048 tokens, scaling to **28× at 8,192 tokens** with **98.4% memory footprint reduction**.
-   - Sparse PagedAttention decoding kernel achieves **8× effective memory bandwidth** over dense autoregressive decoding.
+   - Up to **3.11× faster than FlashAttention-2 (PyTorch SDPA)** at 8,192 tokens and 98.4% block sparsity on A100, breaking even at ~50% sparsity for $N \ge 2048$; correctness verified against a masked dense reference at every sparsity level.
+   - Sparse PagedAttention decoding prototype skips KV-cache loads for non-routed blocks; in a mock serving benchmark, decode attention ran ~8× faster than dense at `req_depth=4` (reported in legacy docs as "effective bandwidth"; this is skipped work, not exceeded hardware bandwidth). Not yet validated in a real serving stack.
 
 2. **LLaMA Surgery (Zero-From-Scratch Sparsification)**:
    - Surgically replaces attention layers in pre-trained, frozen open-weights models (Llama 3.1 8B, TinyLlama 1.1B, Gemma 4, Qwen 3.6) with factorized Gumbel-Softmax *Dynamic Topology Routers*.
@@ -35,10 +35,11 @@ The numerical stability, error bounds, and rotational coherence of the architect
 4. **Project Q-Ultrametric (Hardware-Embeddable Quantum Annealing)**:
    - Solves the quadratic minor embedding bottleneck of physical quantum annealers (D-Wave Advantage Pegasus $P_{16}$ and Advantage2 Zephyr $Z_{15}$).
    - While dense complete graphs ($K_N$) scale physical qubits as $\Theta(N^2)$ and chain lengths as $\Theta(N)$ (squashing dynamic range $J_{\mathrm{eff}} \propto 1/\sqrt{N}$ into analog flux noise), constraining interactions to $p$-adic tree hierarchies yields **$O(N)$ physical qubits** and **$L_{\mathrm{max}} \le 2$ chains**.
-   - **Direction 1: HEA & Planted Frustrated Spin Glasses**: Preserves non-mean-field **Parisi Replica Symmetry Breaking (RSB)** and NP-hard energy landscapes via Hierarchical Edwards-Anderson (HEA) spin glasses ($1/2 < \sigma < 1$). Includes 165 instances certified with exact SCIP (`MIPGap = 0.0`) and 660 QPU batch jobs (33.00s quota).
-   - **Direction 2: Hardware-Embeddable Modularity Maximization**: Transforms dense community detection QUBOs ($B_{ij} = A_{ij} - \frac{k_i k_j}{2m}$) into hardware-embeddable sparse topologies via multi-scale cophenetic tree cuts ($Q_{ij}^{\mathrm{sparse}} = Q_{ij} \cdot \mathbb{I}[d_U(i, j) \le d_{\max}]$). Slashes physical qubit footprint by **75%** ($156.3 \pm 4.6 \to 39.0 \pm 0.0$ qubits) and maximum chain lengths by **67%** ($6 \to 2$) on D-Wave Pegasus $P_{16}$ (benchmarked on Zachary Karate Club, $N=34$, across 10 random embedding seeds). The complete suite spans 35 heterogeneous networks across sizes $N \in [15, 128]$ (140 problem instances, 420 QPU jobs, 21.00s quota).
-   - **Direction 3: Hardware-Aware Sparse QBM (HQ-QBM)**: Co-trains generative visible-hidden interaction topologies strictly bounded to Pegasus tree minors ($L_{\max} \le 2$) via Continuous Logit Homotopy ($\tau: 1.0 \to 0.1$) and Straight-Through Estimators (STE). Trains generative models (Bars-and-Stripes, downscaled digits, Dyck grammars) with Quantum Contrastive Divergence (200 physical gradient updates, 10.00s quota).
-   - **Zero-Cost & Quota Protection**: All 3 directions adhere strictly to the 60.0s free Leap monthly tier (totaling 64.0s across 3 monthly cycles). All hybrid decomposition executes locally with an explicit architectural prohibition against `LeapHybridSampler`.
+   - **Direction 1: HEA & Planted Frustrated Spin Glasses**: Preserves non-mean-field **Parisi Replica Symmetry Breaking (RSB)** and NP-hard energy landscapes via Hierarchical Edwards-Anderson (HEA) spin glasses ($1/2 < \sigma < 1$). Includes 165 instances certified with exact SCIP (`MIPGap = 0.0`) and a 660-job QPU batch manifest (33.00s budgeted quota), dry-run validated via local simulated annealing.
+   - **Direction 2: Hardware-Embeddable Modularity Maximization**: Transforms dense community detection QUBOs ($B_{ij} = A_{ij} - \frac{k_i k_j}{2m}$) into hardware-embeddable sparse topologies via multi-scale cophenetic tree cuts ($Q_{ij}^{\mathrm{sparse}} = Q_{ij} \cdot \mathbb{I}[d_U(i, j) \le d_{\max}]$). Slashes physical qubit footprint by **75%** ($156.3 \pm 4.6 \to 39.0 \pm 0.0$ qubits) and maximum chain lengths by **67%** ($6 \to 2$) on D-Wave Pegasus $P_{16}$ (benchmarked on Zachary Karate Club, $N=34$, across 10 random embedding seeds). The complete suite spans 35 heterogeneous networks across sizes $N \in [15, 128]$ (140 problem instances; 420-job QPU manifest, 21.00s budgeted quota, dry-run validated locally).
+   - **Direction 3: Hardware-Aware Sparse QBM (HQ-QBM)**: Co-trains generative visible-hidden interaction topologies strictly bounded to Pegasus tree minors ($L_{\max} \le 2$) via Continuous Logit Homotopy ($\tau: 1.0 \to 0.1$) and Straight-Through Estimators (STE). Trains generative models (Bars-and-Stripes, downscaled digits, Dyck grammars) with Contrastive Divergence on classical samplers, plus a planned Quantum Contrastive Divergence phase (200 physical gradient updates, 10.00s budgeted quota).
+   - **Zero-Cost & Quota Protection**: All 3 directions are budgeted to fit the 60.0s free Leap monthly tier (64.0s total across 3 monthly cycles). All hybrid decomposition executes locally with an explicit architectural prohibition against `LeapHybridSampler`.
+   - **Hardware Status**: Embedding metrics (physical qubits, chain lengths) are computed locally against the Pegasus/Zephyr hardware graphs, and ground states are certified via SCIP. **No jobs have yet been executed on D-Wave QPU hardware**; all sampler results to date come from local simulated annealing (`neal`) dry runs. QPU execution is pending Leap access.
 
 5. **Lean 4 Machine-Checked Mathematical Foundations**:
    - Exact mathematical invariants verified with zero `sorry`s against Mathlib4.
@@ -109,19 +110,28 @@ sparse-ai/
 ### 1. Triton Kernel Forward Execution Time (A100 GPU)
 
 > [!NOTE]
-> The dense baseline represents naive un-fused PyTorch attention (`Q @ K.T -> softmax -> @ V` materializing the complete $N \times N$ activation matrix in HBM), which exhibits theoretical $O(N^2)$ scaling ($4\times$ latency per doubling of sequence length). Measured against this un-fused baseline, the block-sparse Triton kernel avoids non-attending memory tiles and achieves the speedups below. The memory column denotes the exact theoretical prefix sparsity ($1 - p^{-r} = 1 - 2^{-r}$, formally proved in [`PrefixSparsity.lean`](formalization/Formalization/Combinatorics/PrefixSparsity.lean)).
+> Measured on an **NVIDIA A100-SXM4-40GB** (torch 2.11, Triton 3.6.0, CUDA 13.0, fp16, non-causal forward, batch 8, 8 heads, head_dim 64, 128×128 tiles, median of 30 runs). Raw data: [`benchmark_triton_v3_sdpa_a100_2026-10-03.json`](benchmarks/results/benchmark_triton_v3_sdpa_a100_2026-10-03.json); reproduce with [`benchmarks/benchmark_triton.py`](benchmarks/benchmark_triton.py). Every row's output was checked against a block-masked dense reference (max abs error ≤ 1e-3). Routing in this benchmark is **synthetic** (each block's natural binary path), so full depth corresponds to block-diagonal attention; learned routes may be less balanced.
 
-| Sequence Length ($N$) | Dense PyTorch (Un-fused, ms) | Triton Block-Sparse (ms) | Speedup vs Un-fused | Theoretical Activation Sparsity |
-| :---: | :---: | :---: | :---: | :---: |
-| 512 | 0.42 | 0.18 | 2.33× | 50.0% |
-| 1,024 | 1.68 | 0.35 | 4.80× | 75.0% |
-| 2,048 | 6.72 | 0.58 | 11.59× | 87.5% |
-| 4,096 | 26.88 | 1.41 | 19.06× | 93.8% |
-| 8,192 | 107.52 | 3.84 | 28.00× | 98.4% |
+**Headline baseline: PyTorch SDPA (FlashAttention-2 backend).**
 
-### 2. Distributed Communication Savings
+| $N$ | Depth | Block Sparsity | SDPA / Flash (ms) | Triton Dense, same kernel (ms) | Triton Sparse (ms) | **vs SDPA** | vs own dense | vs un-fused PyTorch |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 1,024 | 3/3 | 87.5% | 0.167 | 0.406 | 0.180 | 0.93× | 2.25× | 4.60× |
+| 2,048 | 1/4 | 50.0% | 0.545 | 1.108 | 0.544 | 1.00× | 2.04× | 5.80× |
+| 2,048 | 4/4 | 93.8% | 0.430 | 0.888 | 0.253 | **1.70×** | 3.51× | 11.43× |
+| 4,096 | 2/5 | 75.0% | 1.568 | 3.144 | 1.138 | **1.38×** | 2.76× | 11.37× |
+| 4,096 | 5/5 | 96.9% | 1.579 | 3.105 | 0.627 | **2.52×** | 4.95× | 20.48× |
+| 8,192 | 3/6 | 87.5% | 6.247 | 11.492 | 2.722 | **2.30×** | 4.22× | 20.29× |
+| 8,192 | 6/6 | 98.4% | 6.263 | 11.494 | 2.011 | **3.11×** | 5.72× | 27.45× |
 
-In distributed long-context training across multi-node clusters (**Topological Ring Attention**), exchanging tokens only between active hierarchical tree branches yields a **78.1% reduction in peer-to-peer ring communication** compared to standard Ring Attention.
+**Reading the table honestly:**
+- Against FlashAttention, the sparse kernel **breaks even at ~50% sparsity for $N \ge 2048$** and reaches **3.11× at 98.4% sparsity (8K)**. Below 1K tokens it is slower than SDPA.
+- The kernel's own dense path is ~1.8× slower than FlashAttention, and the achieved sparse gain (5.72× at 98.4%) is far below the ideal $1/(1-s) = 64\times$, because the inner loop still visits every key block to test its route. Both are engineering headroom (block-index lists, Flash-style pipelining), not fundamental limits.
+- Speedups vs un-fused PyTorch (up to 27×) are included for continuity but mostly reflect fusion, not sparsity. Peak-memory savings vs un-fused (up to 98.4%) likewise come from never materializing the $N \times N$ matrix; SDPA achieves the same.
+
+### 2. Distributed Communication Savings (Simulated)
+
+In an **analytical simulation** of an 8-GPU Ring Attention schedule on a 1,024-token sequence, restricting exchanges to routed tree branches reduces the count of peer-to-peer block transfers from 2,048 to 448 (**78.1% fewer edges**). This is an edge count, not a measured multi-node run; wall-clock and bandwidth savings on real clusters have not yet been benchmarked.
 
 ### 3. Empirical Retrieval Retention Sweep & The Moving Phase Transition ($N = 4,096$)
 
@@ -150,6 +160,8 @@ Pre-compiled weights, drop-in architectures, and quantized GGUF artifacts for co
 * **[`sneedjak/Adelic-Gemma-4-31B-it`](https://huggingface.co/sneedjak/Adelic-Gemma-4-31B-it)**: Custom Adèlic topological cache condensation wrapper for Gemma 4 31B Multimodal Instruct. Available in `Q4_K_M`, `Q5_K_M`, and uncompressed master GGUFs for [`llama.cpp`](https://github.com/sneed-and-feed/llama.cpp/tree/feature/gemma4-adelic) with hardware-accelerated `ggml_adelic_condense` CUDA kernels (277.5 prefill tok/s, 31.2 decode tok/s on NVIDIA A100).
 * **[`sneedjak/Adelic-Qwen3.6-27B-Topology`](https://huggingface.co/sneedjak/Adelic-Qwen3.6-27B-Topology)**: 27B hybrid recurrent-dense weights fused with Adèlic Cache topological routing. Available in `Q8_0` GGUF for [`llama.cpp`](https://github.com/sneed-and-feed/llama.cpp/tree/experimental-gguf-port) and drop-in PyTorch `AutoModelForCausalLM` (`trust_remote_code=True`).
 
+> [!WARNING]
+> **These checkpoints are experimental and currently degrade long-document QA.** They use Adèlic **KV-cache condensation** (medoid key merging), which is a different mechanism from the learned block router evaluated in §3. On QASPER (LongBench), cache condensation scored **8.6 F1 vs. 25.8 F1** for the unmodified Qwen baseline (n = 5), and a separate run collapsed to **0.5 F1** with repetitive output loops on 20/20 samples (see [`benchmarks/BENCHMARKS.md`](benchmarks/BENCHMARKS.md) §4–5). Throughput numbers above measure speed only, not output quality. The learned router (3F) has not yet been evaluated on QASPER; that experiment is in progress.
 ---
 
 ## Quickstart

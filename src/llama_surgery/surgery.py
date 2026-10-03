@@ -293,6 +293,26 @@ class SurgicalLlamaAttention(nn.Module):
             # Attention Sink (Token 0)
             um_mask_bool[..., :, 0] = True
 
+            # [Eval hook, opt-in] Matched-budget baseline: replace the routed mask
+            # with a causal sliding window of W keys + sink (StreamingLLM-style).
+            if getattr(self.config, "surgical_mask_override", None) == "window":
+                W = int(getattr(self.config, "surgical_window_size", 256))
+                idx_q = torch.arange(L - seq_len, L, device=hidden_states.device)
+                idx_k = torch.arange(L, device=hidden_states.device)
+                band = (idx_k.unsqueeze(0) > idx_q.unsqueeze(1) - W)  # (seq_len, L)
+                um_mask_bool = band.unsqueeze(0).unsqueeze(0).expand_as(um_mask_bool).clone()
+                um_mask_bool[..., :, 0] = True
+
+            # [Eval hook, opt-in] Record the mean number of causal keys each query
+            # may attend to (prefill only), so budgets are measured, not assumed.
+            if getattr(self.config, "surgical_collect_stats", False) and seq_len > 1:
+                idx_q = torch.arange(L - seq_len, L, device=hidden_states.device)
+                idx_k = torch.arange(L, device=hidden_states.device)
+                causal = idx_k.unsqueeze(0) <= idx_q.unsqueeze(1)
+                allowed = (um_mask_bool & causal).sum(-1).float()   # (B, H, seq_len)
+                self.last_mean_allowed_keys = allowed.mean().item()
+                self.last_mean_causal_keys = causal.sum(-1).float().mean().item()
+
             sparse_scores = scores.masked_fill(~um_mask_bool, float('-inf'))
             is_all_neg_inf = (sparse_scores == float('-inf')).all(dim=-1, keepdim=True)
             sparse_scores = sparse_scores.masked_fill(is_all_neg_inf, 0.0)

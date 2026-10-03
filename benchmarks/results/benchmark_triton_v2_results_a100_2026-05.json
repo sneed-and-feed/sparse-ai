@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "triton": "3.6.0",
+    "date": "2026-05",
+    "source": "Transcribed verbatim from saved Colab notebook cell output of benchmarks/benchmark_triton.py (original JSON not retained).",
+    "config": {"embed_dim": 512, "num_heads": 8, "head_dim": 64, "batch": 8, "p": 2,
+               "dtype": "float16", "warmup": 10, "runs": 30, "stat": "median",
+               "block_m": 128, "block_n": 128},
+    "baseline": "Un-fused PyTorch attention (matmul -> softmax -> matmul), materializes N x N scores",
+    "mem_save_note": "Peak allocated memory saving vs. the un-fused baseline; dominated by not materializing the N x N score matrix, hence identical across depths at a given seq_len.",
+    "correctness_check": {"seq_len": 256, "req_depth": 0, "max_abs_diff_vs_dense": 0.000488, "passed": true}
+  },
+  "results": [
+    {"seq_len": 256,  "num_blocks": 2,  "depth": "1/1", "sparsity": "50%", "dense_ms": 0.15,  "triton_ms": 0.20, "speedup": "0.72x",  "mem_save": "49.7%"},
+    {"seq_len": 512,  "num_blocks": 4,  "depth": "1/2", "sparsity": "50%", "dense_ms": 0.33,  "triton_ms": 0.12, "speedup": "2.68x",  "mem_save": "72.6%"},
+    {"seq_len": 512,  "num_blocks": 4,  "depth": "2/2", "sparsity": "75%", "dense_ms": 0.27,  "triton_ms": 0.10, "speedup": "2.60x",  "mem_save": "72.6%"},
+    {"seq_len": 1024, "num_blocks": 8,  "depth": "1/3", "sparsity": "50%", "dense_ms": 0.82,  "triton_ms": 0.25, "speedup": "3.35x",  "mem_save": "86.4%"},
+    {"seq_len": 1024, "num_blocks": 8,  "depth": "3/3", "sparsity": "88%", "dense_ms": 0.82,  "triton_ms": 0.15, "speedup": "5.51x",  "mem_save": "86.4%"},
+    {"seq_len": 2048, "num_blocks": 16, "depth": "1/4", "sparsity": "50%", "dense_ms": 3.13,  "triton_ms": 0.63, "speedup": "4.94x",  "mem_save": "93.4%"},
+    {"seq_len": 2048, "num_blocks": 16, "depth": "2/4", "sparsity": "75%", "dense_ms": 3.13,  "triton_ms": 0.34, "speedup": "9.11x",  "mem_save": "93.4%"},
+    {"seq_len": 2048, "num_blocks": 16, "depth": "4/4", "sparsity": "94%", "dense_ms": 2.88,  "triton_ms": 0.22, "speedup": "12.89x", "mem_save": "93.4%"},
+    {"seq_len": 4096, "num_blocks": 32, "depth": "1/5", "sparsity": "50%", "dense_ms": 12.82, "triton_ms": 1.73, "speedup": "7.40x",  "mem_save": "96.8%"},
+    {"seq_len": 4096, "num_blocks": 32, "depth": "2/5", "sparsity": "75%", "dense_ms": 12.95, "triton_ms": 1.11, "speedup": "11.71x", "mem_save": "96.8%"},
+    {"seq_len": 4096, "num_blocks": 32, "depth": "5/5", "sparsity": "97%", "dense_ms": 12.84, "triton_ms": 0.59, "speedup": "21.81x", "mem_save": "96.8%"},
+    {"seq_len": 8192, "num_blocks": 64, "depth": "1/6", "sparsity": "50%", "dense_ms": 55.30, "triton_ms": 6.36, "speedup": "8.70x",  "mem_save": "98.4%"},
+    {"seq_len": 8192, "num_blocks": 64, "depth": "3/6", "sparsity": "88%", "dense_ms": 55.27, "triton_ms": 2.69, "speedup": "20.54x", "mem_save": "98.4%"},
+    {"seq_len": 8192, "num_blocks": 64, "depth": "6/6", "sparsity": "98%", "dense_ms": 55.30, "triton_ms": 1.98, "speedup": "27.97x", "mem_save": "98.4%"}
+  ]
+}
