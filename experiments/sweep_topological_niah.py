@@ -213,12 +213,23 @@ def warmup_router_wikitext(
     corpus_texts = []
     try:
         from datasets import load_dataset
-        ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
+        ds, err = None, None
+        for repo in ("Salesforce/wikitext", "wikitext"):
+            try:
+                ds = load_dataset(repo, "wikitext-2-raw-v1", split="train")
+                break
+            except Exception as e:  # noqa: BLE001
+                err = e
+        if ds is None:
+            raise RuntimeError(err)
         raw_chunks = [t.strip() for t in ds["text"] if len(t.strip()) > 200]
         corpus_texts = raw_chunks[:max(steps * 2, 200)]
         print(f"[Data] Loaded {len(corpus_texts)} chunks from wikitext-2-raw-v1.")
     except Exception as e:
-        print(f"[Notice] Hugging Face datasets not available ({e}). Using embedded multi-domain natural language corpus.")
+        print("!" * 70)
+        print(f"[WARNING] WikiText load FAILED ({e}).")
+        print("[WARNING] Warmup is using the 8-paragraph EMBEDDED corpus, NOT WikiText.")
+        print("!" * 70)
         corpus_texts = [
             "Mathematics is the science and study of quality, structure, space, and change. Mathematicians seek out patterns, formulate new conjectures, and establish truth by rigorous deduction from appropriately chosen axioms and definitions. Through the use of abstraction and logical reasoning, mathematics evolved from counting, calculation, measurement, and the systematic study of the shapes and motions of physical objects.",
             "The French Revolution was a period of fundamental political and societal change in France that began with the Estates General of 1789 and ended in November 1799 with the formation of the French Consulate. Many of its ideas are considered fundamental principles of liberal democracy, while its values and institutions remain central to modern French political discourse.",

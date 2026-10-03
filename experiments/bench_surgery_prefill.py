@@ -59,7 +59,16 @@ def git_sha():
 
 def load_test_tokens(tok, n_max):
     from datasets import load_dataset
-    ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+    ds, err = None, None
+    for repo in ("Salesforce/wikitext", "wikitext"):
+        try:
+            ds = load_dataset(repo, "wikitext-2-raw-v1", split="test")
+            print(f"[Data] Loaded WikiText-2 test from '{repo}'")
+            break
+        except Exception as e:  # noqa: BLE001
+            err = e
+    if ds is None:
+        raise RuntimeError(f"Could not load WikiText-2 test: {err}")
     text = "\n\n".join(t for t in ds["text"] if t.strip())
     ids = tok(text, return_tensors="pt")["input_ids"][0]
     if ids.numel() < n_max:
