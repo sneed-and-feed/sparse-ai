@@ -8,8 +8,9 @@ Compares, at matched routing / sparsity:
              dense; the baseline that matters.
   scan       benchmarks/benchmark_triton.py kernel (README numbers): visits every
              key block and tests its route. Non-causal only.
-  lib        ultrametric.kernel.ultrametric_attention_triton (README quickstart
-             ``block_sparse_attention``). Its wrapper rebuilds the block lists and
+  lib        ultrametric.kernel.ultrametric_attention_triton (legacy kernel; it backed
+             the README quickstart ``block_sparse_attention`` until 2026-10-03, which now
+             uses the block-list kernel). Its wrapper rebuilds the block lists and
              syncs (.item()) on every call, so its time INCLUDES list construction;
              compare it to ``list+build``.
   list       ultrametric.block_list.block_list_attention, kernel only (lists

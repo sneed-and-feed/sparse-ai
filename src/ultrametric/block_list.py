@@ -260,13 +260,14 @@ if HAS_TRITON:
 
     @triton.jit
     def _block_list_fwd_kernel(
-        Q, K, V, Out, Lists, Counts, sm_scale,
+        Q, K, V, Out, Lse, Lists, Counts, sm_scale,
         stride_qz, stride_qh, stride_qm, stride_qd,
         stride_kz, stride_kh, stride_kn, stride_kd,
         stride_vz, stride_vh, stride_vn, stride_vd,
         stride_oz, stride_oh, stride_om, stride_od,
         H, N_CTX, NUM_RB, MAX_COUNT, COUNT_BUCKET,
         HEAD_DIM: tl.constexpr, ROUTE_BLOCK: tl.constexpr, IS_CAUSAL: tl.constexpr,
+        STORE_LSE: tl.constexpr,
         BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
     ):
         # COUNT_BUCKET is unused in the body; it is an autotune key (next pow2 of
@@ -327,6 +328,10 @@ if HAS_TRITON:
         acc = acc / l_i[:, None]
         tl.store(o_base + offs_m[:, None] * stride_om + offs_d[None, :] * stride_od,
                  acc.to(Out.dtype.element_ty), mask=m_valid[:, None])
+        if STORE_LSE:
+            # m_i is in log2 units (scores were scaled by log2(e)); convert to natural log.
+            lse = (m_i + tl.math.log2(l_i)) * 0.6931471805599453
+            tl.store(Lse + off_hz.to(tl.int64) * N_CTX + offs_m, lse, mask=m_valid)
 
     def _prune_configs(configs, named_args, **kwargs):
         args = {**named_args, **kwargs}
@@ -368,7 +373,8 @@ def block_list_attention(
     block_n: Optional[int] = None,
     num_warps: int = 4,
     num_stages: int = 3,
-) -> torch.Tensor:
+    return_lse: bool = False,
+):
     """Block-sparse attention forward over precomputed block lists.
 
     Args:
@@ -381,9 +387,11 @@ def block_list_attention(
             so blocks after the diagonal are never visited).
         block_m, block_n: fix tile sizes (bypasses autotuning). Must divide
             route_block.
+        return_lse: also return the per-row log-sum-exp (natural log) of the
+            scaled scores, (Z, H, N) fp32; -inf for rows with no visible keys.
 
     Returns:
-        out: (Z, H, N, D), same dtype as q.
+        out: (Z, H, N, D), same dtype as q; or (out, lse) if return_lse.
     """
     if not HAS_TRITON:
         raise RuntimeError("block_list_attention requires Triton")
@@ -408,13 +416,14 @@ def block_list_attention(
     counts = counts.to(torch.int32).contiguous()
 
     out = torch.empty_like(q)
+    lse = torch.empty((Z, H, N), dtype=torch.float32, device=q.device) if return_lse else out
     scale = sm_scale if sm_scale is not None else 1.0 / math.sqrt(D)
     args = (
-        q, k, v, out, lists, counts, scale,
+        q, k, v, out, lse, lists, counts, scale,
         *q.stride(), *k.stride(), *v.stride(), *out.stride(),
         H, N, nb, max_count, _next_pow2(max_count),
     )
-    meta = dict(HEAD_DIM=D, ROUTE_BLOCK=route_block, IS_CAUSAL=bool(is_causal))
+    meta = dict(HEAD_DIM=D, ROUTE_BLOCK=route_block, IS_CAUSAL=bool(is_causal), STORE_LSE=bool(return_lse))
 
     use_autotune = block_m is None and block_n is None and q.is_cuda and not _INTERPRET
     if use_autotune:
@@ -429,7 +438,7 @@ def block_list_attention(
         if not _INTERPRET:
             launch.update(num_warps=num_warps, num_stages=num_stages)
         _block_list_fwd_kernel[(triton.cdiv(N, bm), Z * H)](*args, **launch)
-    return out
+    return (out, lse) if return_lse else out
 
 
 def routed_block_attention(

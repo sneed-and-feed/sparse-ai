@@ -214,6 +214,9 @@ def main():
     ap.add_argument("--no_window_baseline", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output_dir", default="experiments/results")
+    ap.add_argument("--attention_backend", default="eager", choices=["eager", "block_list"],
+                    help="'block_list' = block-granular routing + Triton kernel for prefill (routed@r and dense); "
+                         "window@r baselines always use the eager path")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -222,8 +225,9 @@ def main():
     assert all(d > 0 for d in depths), "r=0 (dense) is always run; pass only r > 0"
 
     os.makedirs(args.output_dir, exist_ok=True)
-    pred_path = os.path.join(args.output_dir, "qasper_router_predictions.jsonl")
-    sum_path = os.path.join(args.output_dir, "qasper_router_summary.json")
+    suffix = "" if args.attention_backend == "eager" else f"_{args.attention_backend}"
+    pred_path = os.path.join(args.output_dir, f"qasper_router_predictions{suffix}.jsonl")
+    sum_path = os.path.join(args.output_dir, f"qasper_router_summary{suffix}.json")
 
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     print(f"[1/4] Loading {args.model_id}")
@@ -240,6 +244,7 @@ def main():
         print(f"[3/4] WikiText warmup ({args.train_steps} steps; same recipe as 3F)")
         warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda")
     model.eval()
+    model.config.surgical_attention_backend = args.attention_backend
 
     data = load_qasper()[: args.max_samples]
     print(f"[4/4] Evaluating {len(data)} QASPER samples | depths {depths} | "

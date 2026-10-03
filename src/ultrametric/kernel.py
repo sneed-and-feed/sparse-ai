@@ -16,6 +16,7 @@ Falls back to PyTorch masked attention if Triton is not installed.
 
 import torch
 import math
+import os
 from typing import Optional
 
 try:
@@ -516,8 +517,67 @@ def ultrametric_attention_triton(
     return out, L
 
 
-# Canonical alias for quickstart API
-block_sparse_attention = ultrametric_attention_triton
+def block_sparse_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    router_indices: torch.Tensor,
+    req_depth: int = 2,
+    p: int = 2,
+    is_causal: bool = False,
+    route_block: int = 128,
+):
+    """Quickstart API: block-sparse routed attention forward (inference).
+
+    Backed by the block-list kernel (``ultrametric.block_list``), which loops over
+    only each query block's active key blocks. Same call signature and return
+    value as the legacy ``ultrametric_attention_triton``: ``(out, lse)`` where
+    ``lse`` is the per-row natural log-sum-exp of the scaled scores, (Z, H, N) fp32.
+
+    Args:
+        q, k, v: (Z, H, N, D) fp16/bf16 (fp32 also accepted), D a power of two >= 16.
+        router_indices: (Z, H, num_blocks, tree_depth) non-negative integer branch ids,
+            one routing vector per ``route_block`` tokens. If fewer than
+            ceil(N / route_block) blocks are given, the rest are padded with branch 0.
+        req_depth: blocks match iff their routing vectors agree on the first
+            ``req_depth`` levels (0 = dense).
+        p: tree arity (informational; ids are validated on the host).
+        is_causal: token-level causal masking.
+
+    Notes:
+        This wrapper validates ids and sizes the lists exactly, which costs a few
+        host syncs per call. In a hot loop, build lists once with
+        ``build_block_lists(..., arity=p)`` (sync-free) and call
+        ``block_list_attention`` directly. Forward only (no autograd).
+        Without CUDA/Triton it falls back to an fp32 masked PyTorch reference.
+    """
+    from .block_list import (block_list_attention, block_mask_reference, build_block_lists,
+                             token_mask_from_blocks)
+
+    Z, H, N, D = q.shape
+    router_indices = router_indices.to(torch.int64)
+    nb = -(-N // route_block)
+    have = router_indices.shape[2]
+    if have < nb:
+        pad = torch.zeros((Z, H, nb - have, router_indices.shape[-1]), dtype=router_indices.dtype,
+                          device=router_indices.device)
+        router_indices = torch.cat([router_indices, pad], dim=2)
+    elif have > nb:
+        router_indices = router_indices[:, :, :nb]
+
+    use_kernel = HAS_TRITON and (q.is_cuda or os.environ.get("TRITON_INTERPRET", "0") == "1")
+    if use_kernel:
+        bl = build_block_lists(router_indices, req_depth, is_causal=is_causal)
+        return block_list_attention(q, k, v, bl, route_block=route_block, is_causal=is_causal,
+                                    return_lse=True)
+
+    bm = block_mask_reference(router_indices, req_depth, is_causal=is_causal)
+    mask = token_mask_from_blocks(bm, route_block, N, is_causal=is_causal)
+    s = torch.matmul(q.float(), k.float().transpose(-2, -1)) / math.sqrt(D)
+    s = s.masked_fill(~mask, float("-inf"))
+    lse = torch.logsumexp(s, dim=-1)
+    out = torch.matmul(torch.softmax(s, dim=-1).nan_to_num(0.0), v.float()).to(q.dtype)
+    return out, lse
 
 
 class CurriculumSparseAttention(torch.autograd.Function):

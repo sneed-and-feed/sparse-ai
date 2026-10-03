@@ -173,3 +173,72 @@ def test_autotuned_kernel_cuda(is_causal):
     mask = token_mask_from_blocks(block_mask_reference(router, 2, is_causal=is_causal), rb, N, is_causal)
     ref = masked_reference_attention(q, k, v, mask)
     assert (out.float() - ref.float()).abs().max().item() < 2e-3
+
+
+@pytest.mark.parametrize("head_dim", [64, 128])
+@pytest.mark.skipif(not (HAS_TRITON and torch.cuda.is_available() and not INTERPRET),
+                    reason="autotuned path needs CUDA")
+def test_autotuned_kernel_cuda_head_dims(head_dim):
+    """Llama-3 uses head_dim 128; some autotune configs may exceed shared memory."""
+    torch.manual_seed(1)
+    Z, H, N, rb = 1, 4, 2048, 128
+    for dtype in (torch.float16, torch.bfloat16):
+        q, k, v = (torch.randn(Z, H, N, head_dim, device="cuda", dtype=dtype) for _ in range(3))
+        router = random_router(Z, H, N // rb, 4, 2, seed=3).cuda()
+        bl = build_block_lists(router, 2, is_causal=True, sink_block=True, local_blocks=1, arity=2)
+        out = block_list_attention(q, k, v, bl, route_block=rb, is_causal=True)
+        bm = block_mask_reference(router, 2, is_causal=True, sink_block=True, local_blocks=1)
+        ref = masked_reference_attention(q, k, v, token_mask_from_blocks(bm, rb, N, True))
+        tol = 2e-3 if dtype == torch.float16 else 1.6e-2
+        assert (out.float() - ref.float()).abs().max().item() < tol
+
+
+# ----------------------------------------------------------------------------
+# Log-sum-exp output and the quickstart API (block_sparse_attention)
+# ----------------------------------------------------------------------------
+
+def _masked_lse(q, k, mask):
+    s = torch.matmul(q.float(), k.float().transpose(-2, -1)) / math.sqrt(q.shape[-1])
+    return torch.logsumexp(s.masked_fill(~mask, float("-inf")), dim=-1)
+
+
+@pytest.mark.skipif(not CAN_RUN_KERNEL, reason="needs Triton + CUDA, or TRITON_INTERPRET=1")
+@pytest.mark.parametrize("is_causal", [False, True])
+def test_kernel_lse_matches_reference(is_causal):
+    torch.manual_seed(2)
+    Z, H, N, D, rb = 1, 2, 200, 32, 64
+    dtype = torch.float16 if DEVICE == "cuda" else torch.float32
+    q, k, v = (torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype) for _ in range(3))
+    router = random_router(Z, H, math.ceil(N / rb), 3, 2, seed=11).to(DEVICE)
+    bl = build_block_lists(router, 2, is_causal=is_causal)
+    out, lse = block_list_attention(q, k, v, bl, route_block=rb, is_causal=is_causal,
+                                    block_m=32, block_n=32, return_lse=True)
+    mask = token_mask_from_blocks(block_mask_reference(router, 2, is_causal=is_causal), rb, N, is_causal)
+    ref_lse = _masked_lse(q, k, mask)
+    assert lse.shape == (Z, H, N) and lse.dtype == torch.float32
+    tol = 1e-2 if dtype == torch.float16 else 1e-4
+    assert (lse - ref_lse).abs().max().item() < tol
+    out2 = block_list_attention(q, k, v, bl, route_block=rb, is_causal=is_causal, block_m=32, block_n=32)
+    assert torch.equal(out, out2)  # LSE store must not change the output
+
+
+@pytest.mark.parametrize("is_causal", [False, True])
+def test_block_sparse_attention_quickstart_api(is_causal):
+    """README quickstart: `out, L = block_sparse_attention(...)`. Runs the kernel on
+    CUDA / interpreter, the PyTorch reference fallback otherwise."""
+    from ultrametric.kernel import block_sparse_attention
+
+    torch.manual_seed(3)
+    Z, H, N, D = 2, 2, 300, 32
+    dtype = torch.float16 if DEVICE == "cuda" else torch.float32
+    q, k, v = (torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype) for _ in range(3))
+    router = random_router(Z, H, 2, 4, 2, seed=5).to(DEVICE)   # fewer blocks than needed -> padded
+    out, L = block_sparse_attention(q, k, v, router, req_depth=2, is_causal=is_causal)
+    assert out.shape == q.shape and L.shape == (Z, H, N)
+
+    full = torch.cat([router.long(), torch.zeros(Z, H, 1, 4, dtype=torch.long, device=DEVICE)], dim=2)
+    mask = token_mask_from_blocks(block_mask_reference(full, 2, is_causal=is_causal), 128, N, is_causal)
+    ref = masked_reference_attention(q, k, v, mask)
+    tol = 2e-3 if dtype == torch.float16 else 1e-4
+    assert (out.float() - ref.float()).abs().max().item() < tol
+    assert (L - _masked_lse(q, k, mask)).abs().max().item() < (1e-2 if dtype == torch.float16 else 1e-4)

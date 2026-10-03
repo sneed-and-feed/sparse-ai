@@ -151,6 +151,79 @@ class SurgicalLlamaAttention(nn.Module):
             init_mode=init_mode
         )
 
+    # ------------------------------------------------------------------
+    # Opt-in fast prefill backend (config.surgical_attention_backend = "block_list")
+    # ------------------------------------------------------------------
+    def _block_list_eligible(self, hidden_states, attention_mask, past_key_value) -> bool:
+        """True if this call can use the block-list prefill path.
+
+        Requires: backend opt-in, inference (no grad), a fresh prefill (no cached
+        keys yet), CUDA fp16/bf16, no mask override, and no padding (batch 1 or no
+        attention_mask), since the kernel applies only the causal mask.
+        """
+        if getattr(self.config, "surgical_attention_backend", "eager") != "block_list":
+            return False
+        if torch.is_grad_enabled() or hidden_states.shape[1] <= 1:
+            return False
+        if not hidden_states.is_cuda or hidden_states.dtype not in (torch.float16, torch.bfloat16):
+            return False
+        if getattr(self.config, "surgical_mask_override", None) is not None:
+            return False
+        if attention_mask is not None and hidden_states.shape[0] != 1:
+            return False
+        if past_key_value is not None:
+            past_len = 0
+            if hasattr(past_key_value, "get_seq_length"):
+                try:
+                    past_len = int(past_key_value.get_seq_length(self.layer_idx))
+                except TypeError:
+                    past_len = int(past_key_value.get_seq_length())
+            elif isinstance(past_key_value, tuple) and len(past_key_value) == 2:
+                past_len = past_key_value[0].shape[-2]
+            if past_len != 0:
+                return False
+        return True
+
+    def _block_list_prefill(self, q, k, v, assignments, r):
+        """Causal prefill with BLOCK-granular routing via the Triton block-list kernel.
+
+        Each route block (config.surgical_route_block tokens, default 128) gets one
+        routing vector: the per-level majority vote of its tokens' argmax branches
+        (first r levels). Block i attends to block j <= i iff their vectors agree on
+        all r levels, plus block 0 (sink) and ceil(surgical_local_window / RB) previous
+        blocks (local window). This is coarser than the token-level eager mask, so
+        quality must be measured separately; it is not an exact re-implementation.
+        """
+        from ultrametric.block_list import block_list_attention, build_block_lists
+
+        RB = int(getattr(self.config, "surgical_route_block", 128))
+        B, H, S, _ = q.shape
+        NB = -(-S // RB)
+        idx = assignments[:, :, :S, :r, :].argmax(dim=-1)                 # (B, H, S, r)
+        votes = F.one_hot(idx, self.p).to(torch.float32)                  # (B, H, S, r, p)
+        if NB * RB != S:
+            votes = F.pad(votes, (0, 0, 0, 0, 0, NB * RB - S))
+        block_route = votes.view(B, H, NB, RB, r, self.p).sum(3).argmax(-1).to(torch.int32)  # (B, H, NB, r)
+
+        local_window = int(getattr(self.config, "surgical_local_window", 16))
+        local_blocks = -(-local_window // RB) if local_window > 0 else 0
+        bl = build_block_lists(block_route, r, is_causal=True, sink_block=True,
+                               local_blocks=local_blocks, arity=self.p)
+
+        if getattr(self.config, "surgical_collect_stats", False):
+            # Exact allowed-key count under the block mask: for query block i with
+            # c_i active blocks (all earlier ones full), token t of the block sees
+            # (c_i - 1) * RB + t + 1 keys.
+            lens = torch.full((NB,), RB, dtype=torch.float32, device=q.device)
+            lens[-1] = S - (NB - 1) * RB
+            c = bl.counts.to(torch.float32)
+            allowed = ((c - 1) * RB * lens + lens * (lens + 1) / 2).sum(-1)  # (B, H)
+            self.last_mean_allowed_keys = (allowed.mean() / S).item()
+            self.last_mean_causal_keys = (S + 1) / 2
+            self.last_block_density = (c.sum() / (B * H * NB * (NB + 1) / 2)).item()
+
+        return block_list_attention(q, k, v, bl, route_block=RB, is_causal=True, sm_scale=self.scale)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -162,20 +235,29 @@ class SurgicalLlamaAttention(nn.Module):
         batch_size, seq_len, _ = hidden_states.size()
         past_key_value = kwargs.get("past_key_value", past_key_values)
 
-        tau = getattr(self.config, "surgical_tau", 1.0)
-        curr_assignments, load_balance_loss = self.router(hidden_states, tau_override=tau)
-        self.current_penalty = load_balance_loss
-
-        if past_key_value is None or seq_len > 1:
-            self._cached_assignments = curr_assignments
-            assignments = curr_assignments
+        use_block_list = self._block_list_eligible(hidden_states, attention_mask, past_key_value)
+        req_depth_cfg = getattr(self.config, "surgical_req_depth", None)
+        if use_block_list and req_depth_cfg == 0:
+            # Dense prefill under the block_list backend = plain SDPA; the router is
+            # not needed, so skip it (this is the "unmodified model" reference).
+            self.current_penalty = hidden_states.new_zeros(())
+            self._cached_assignments = None
+            assignments = None
         else:
-            if hasattr(self, '_cached_assignments') and self._cached_assignments is not None:
-                assignments = torch.cat([self._cached_assignments, curr_assignments], dim=2)
-                self._cached_assignments = assignments
-            else:
+            tau = getattr(self.config, "surgical_tau", 1.0)
+            curr_assignments, load_balance_loss = self.router(hidden_states, tau_override=tau)
+            self.current_penalty = load_balance_loss
+
+            if past_key_value is None or seq_len > 1:
+                self._cached_assignments = curr_assignments
                 assignments = curr_assignments
-                self._cached_assignments = assignments
+            else:
+                if hasattr(self, '_cached_assignments') and self._cached_assignments is not None:
+                    assignments = torch.cat([self._cached_assignments, curr_assignments], dim=2)
+                    self._cached_assignments = assignments
+                else:
+                    assignments = curr_assignments
+                    self._cached_assignments = assignments
 
         # Accumulate sparsity penalty during forward pass (REMOVED for gradient checkpointing safety)
 
@@ -225,6 +307,17 @@ class SurgicalLlamaAttention(nn.Module):
         # Broadcast KV for GQA before attention computation
         k = repeat_kv(k, self.num_key_value_groups)
         v = repeat_kv(v, self.num_key_value_groups)
+
+        # [Opt-in] Fast prefill backend: block-granular routing + Triton block-list
+        # kernel (r > 0) or SDPA/FlashAttention (r = 0). Decode steps are unchanged.
+        if use_block_list:
+            if req_depth_cfg == 0:
+                out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            else:
+                r = req_depth_cfg if req_depth_cfg is not None else assignments.shape[-2] // 2
+                out = self._block_list_prefill(q, k, v, assignments, min(r, assignments.shape[-2]))
+            out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
+            return self.o_proj(out), None
 
         use_triton = getattr(self.config, "use_triton_sparse_attention", False)
         req_depth = getattr(self.config, "surgical_req_depth", 2)

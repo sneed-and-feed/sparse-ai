@@ -268,22 +268,34 @@ print(outputs.logits.shape)
 
 ```python
 import torch
-from ultrametric.kernel import block_sparse_attention, ultrametric_attention_triton
+from ultrametric.kernel import block_sparse_attention
 
 batch, heads, seq_len, head_dim = 2, 8, 2048, 64
 Q = torch.randn(batch, heads, seq_len, head_dim, device="cuda", dtype=torch.float16)
 K = torch.randn(batch, heads, seq_len, head_dim, device="cuda", dtype=torch.float16)
 V = torch.randn(batch, heads, seq_len, head_dim, device="cuda", dtype=torch.float16)
 
-# Generate block routing vectors (e.g. from DynamicTopologyRouter)
+# Generate block routing vectors (e.g. from DynamicTopologyRouter), one per 128 tokens
 num_blocks = (seq_len + 127) // 128
 tree_depth = 4
 router_indices = torch.randint(0, 2, (batch, heads, num_blocks, tree_depth), device="cuda", dtype=torch.int32)
 
-# Execute hardware block-skipping attention (supports is_causal=True for causal LLMs)
+# Block-list kernel: visits only each query block's matching key blocks (fp16/bf16, causal or not).
+# Returns the output and the per-row log-sum-exp.
 out, L = block_sparse_attention(Q, K, V, router_indices, req_depth=2, is_causal=True)
 print("Output shape:", out.shape)
 ```
+
+For hot loops, build the lists once and call the kernel directly:
+
+```python
+from ultrametric.block_list import build_block_lists, block_list_attention
+
+lists = build_block_lists(router_indices, req_depth=2, is_causal=True, arity=2)  # sync-free
+out = block_list_attention(Q, K, V, lists, route_block=128, is_causal=True)
+```
+
+To use it inside the surgically patched Llama for prefill, set `model.config.surgical_attention_backend = "block_list"` (inference only; routing becomes block-granular, so quality must be re-measured; see [`experiments/bench_surgery_prefill.py`](experiments/bench_surgery_prefill.py)).
 
 ### Project Q-Ultrametric (Quantum Annealing on Pegasus Topologies)
 

@@ -15,7 +15,7 @@ import json
 import math
 import random
 import argparse
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 
 # Ensure src/ is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
@@ -314,6 +314,23 @@ def evaluate_retrieval_trial(
 # Swept Benchmark Execution
 # ============================================================================
 
+def collect_measured_budget(model) -> Tuple[Optional[float], Optional[float]]:
+    """Mean over layers of (allowed causal keys per query, causal keys per query)
+    recorded by the surgical attention's `surgical_collect_stats` hook during the
+    last prefill. Clears the per-layer values. (None, None) if nothing recorded
+    (e.g. r = 0, whose dense path does not record stats)."""
+    allowed, causal = [], []
+    for layer in model.model.layers:
+        m = layer.self_attn
+        if getattr(m, "last_mean_allowed_keys", None) is not None:
+            allowed.append(m.last_mean_allowed_keys)
+            causal.append(m.last_mean_causal_keys)
+            m.last_mean_allowed_keys = None
+    if not allowed:
+        return None, None
+    return sum(allowed) / len(allowed), sum(causal) / len(causal)
+
+
 def run_topological_niah_sweep(
     model,
     tokenizer,
@@ -322,10 +339,16 @@ def run_topological_niah_sweep(
     depth_values: List[int] = [0, 1, 2, 3, 4, 5],
     device: str = "cuda",
     needle_type: str = "outlier",
+    measure_budget: bool = True,
 ) -> Dict[str, Any]:
     """
     Runs the full parameter sweep across required matching depth r in [0..5]
     and 50 needle positions.
+
+    With measure_budget=True (default) the fraction of causal keys each query is
+    actually allowed to attend to (sinks, local window, causal mask and routing
+    imbalance included) is recorded per trial, so recall can be read against the
+    MEASURED budget rather than the nominal 2^-r.
     """
     # Sample needle positions across early, middle, late context
     # Uniform linspace avoiding boundaries
@@ -338,6 +361,7 @@ def run_topological_niah_sweep(
         "depth_ratios": depth_ratios,
         "sweep": {}
     }
+    setattr(model.config, "surgical_collect_stats", bool(measure_budget))
     
     print("=" * 70)
     print(f"STARTING TOPOLOGICAL NIAH SWEEP (N={context_len}, {num_positions} Needle Positions, Needle='{needle_type}')")
@@ -357,6 +381,7 @@ def run_topological_niah_sweep(
         
         trials = []
         successes = 0
+        fracs, allowed_keys = [], []
         
         for pos_idx, ratio in enumerate(tqdm(depth_ratios, desc=f"Sweep r={r}")):
             input_ids, target_str, insert_idx = build_niah_context(
@@ -369,23 +394,38 @@ def run_topological_niah_sweep(
             
             if passed:
                 successes += 1
+
+            allowed, causal = collect_measured_budget(model) if measure_budget else (None, None)
+            frac = (allowed / causal) if allowed else (1.0 if (measure_budget and r == 0) else None)
+            if frac is not None:
+                fracs.append(frac)
+            if allowed:
+                allowed_keys.append(allowed)
                 
             trials.append({
                 "pos_idx": pos_idx,
                 "needle_ratio": round(ratio, 4),
                 "insert_token_idx": insert_idx,
                 "passed": passed,
-                "generated": gen_text
+                "generated": gen_text,
+                "measured_allowed_fraction": round(frac, 5) if frac is not None else None,
+                "mean_allowed_keys": round(allowed, 1) if allowed else None,
             })
             
         recall_pct = (successes / num_positions) * 100.0
-        print(f"--> Result r={r}: Retrieval Recall = {recall_pct:.1f}% ({successes}/{num_positions})")
+        measured_pct = 100.0 * sum(fracs) / len(fracs) if fracs else None
+        print(f"--> Result r={r}: Retrieval Recall = {recall_pct:.1f}% ({successes}/{num_positions})"
+              + (f" | measured budget {measured_pct:.1f}% (nominal {active_budget_pct:.1f}%)" if measured_pct is not None else ""))
         
         results["sweep"][f"r_{r}"] = {
             "r": r,
             "sparsity_pct": round(sparsity_pct, 2),
             "active_budget_pct": round(active_budget_pct, 2),
             "effective_capacity_k": effective_capacity,
+            "measured_budget_pct": round(measured_pct, 2) if measured_pct is not None else None,
+            "measured_budget_pct_min": round(100 * min(fracs), 2) if fracs else None,
+            "measured_budget_pct_max": round(100 * max(fracs), 2) if fracs else None,
+            "measured_mean_allowed_keys": round(sum(allowed_keys) / len(allowed_keys), 1) if allowed_keys else None,
             "successes": successes,
             "total": num_positions,
             "recall_pct": round(recall_pct, 2),
@@ -520,7 +560,14 @@ def main():
     parser.add_argument("--load_in_4bit", action="store_true", help="Load model in 4-bit NF4")
     parser.add_argument("--output_dir", type=str, default="experiments/results", help="Directory for outputs")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--depths", type=str, default="0,1,2,3,4,5", help="Comma-separated r values to sweep")
+    parser.add_argument("--no_measure_budget", action="store_true",
+                        help="Do not record the measured allowed-key fraction (recorded by default)")
+    parser.add_argument("--attention_backend", type=str, default="eager", choices=["eager", "block_list"],
+                        help="'eager' = token-level routed mask (original); 'block_list' = block-granular "
+                             "routing + Triton block-list kernel for prefill (CUDA fp16/bf16)")
     args = parser.parse_args()
+    depth_values = [int(d) for d in args.depths.split(",") if d.strip()]
     
     print("\n" + "=" * 70)
     print("SPARSE AI: TOPOLOGICAL NIAH RETRIEVAL SWEEP BENCHMARK")
@@ -577,16 +624,35 @@ def main():
         print(f"\n[3/4] Skipping router warmup (Frozen Router, init_mode='{args.init_mode}').")
         
     # 5. Run Sweep
-    print("\n[4/4] Executing parameter sweep across depths r in [0, 1, 2, 3, 4, 5]...")
+    model.eval()
+    setattr(model.config, "surgical_attention_backend", args.attention_backend)
+    print(f"\n[4/4] Executing parameter sweep across depths r in {depth_values} (backend={args.attention_backend})...")
     results = run_topological_niah_sweep(
         model,
         tokenizer,
         context_len=args.context_len,
         num_positions=args.num_positions,
-        depth_values=[0, 1, 2, 3, 4, 5],
+        depth_values=depth_values,
         device=args.device,
         needle_type=args.needle_type,
+        measure_budget=not args.no_measure_budget,
     )
+    try:
+        import subprocess
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.path.dirname(os.path.abspath(__file__)),
+                                      text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        sha = None
+    results["meta"] = {
+        "git_sha": sha,
+        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "torch": torch.__version__,
+        "args": vars(args),
+        "router_levels": int(model.model.layers[0].self_attn.router.levels),
+        "budget_note": "active_budget_pct / effective_capacity_k are nominal (2^-r); "
+                       "measured_budget_pct is the mean fraction of causal keys allowed per query "
+                       "(sink, local window, causal mask and routing imbalance included), averaged over layers.",
+    }
     
     # 6. Save JSON & Figures
     os.makedirs(args.output_dir, exist_ok=True)
@@ -600,14 +666,18 @@ def main():
     plot_retrieval_heatmap(results, output_path=os.path.join("figures", "retrieval_heatmap.png"))
     
     # Summary Table Output
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 88)
     print("FINAL TOPOLOGICAL NIAH RETRIEVAL RETENTION TABLE")
-    print("=" * 70)
-    print(f"{'Depth r':<10} | {'Active Budget':<15} | {'Sparsity':<12} | {'Cache K':<10} | {'Recall Rate':<12}")
-    print("-" * 70)
+    print("=" * 88)
+    print(f"{'Depth r':<10} | {'Nominal Budget':<15} | {'Measured Budget':<16} | {'Measured K':<10} | {'Recall Rate':<12}")
+    print("-" * 88)
     for k, d in results["sweep"].items():
-        print(f"r = {d['r']:<6} | {d['active_budget_pct']:>6.1f}%          | {d['sparsity_pct']:>6.1f}%     | {d['effective_capacity_k']:<10} | {d['recall_pct']:>6.1f}% ({d['successes']}/{d['total']})")
-    print("=" * 70)
+        mb = d.get("measured_budget_pct")
+        mk = d.get("measured_mean_allowed_keys")
+        mb_s = f"{mb:>6.1f}%" if mb is not None else "     -"
+        mk_s = f"{mk:<10.0f}" if mk is not None else f"{'-':<10}"
+        print(f"r = {d['r']:<6} | {d['active_budget_pct']:>6.1f}%         | {mb_s}          | {mk_s} | {d['recall_pct']:>6.1f}% ({d['successes']}/{d['total']})")
+    print("=" * 88)
 
 
 if __name__ == "__main__":
