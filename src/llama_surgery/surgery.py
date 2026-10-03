@@ -356,7 +356,7 @@ class SurgicalLlamaAttention(nn.Module):
             if surgical_req_depth == 0:
                 # r = 0: Dense baseline (no sparse masking)
                 attn_weights = F.softmax(scores, dim=-1, dtype=torch.float32)
-                attn_weights = torch.nan_to_num(attn_weights, 0.0)
+                attn_weights.nan_to_num_(0.0)
                 attn_weights = attn_weights.to(v.dtype)
                 attn_weights = self.attn_dropout(attn_weights)
                 out = torch.matmul(attn_weights, v)
@@ -410,10 +410,10 @@ class SurgicalLlamaAttention(nn.Module):
 
             sparse_scores = scores.masked_fill(~um_mask_bool, float('-inf'))
             is_all_neg_inf = (sparse_scores == float('-inf')).all(dim=-1, keepdim=True)
-            sparse_scores = sparse_scores.masked_fill(is_all_neg_inf, 0.0)
+            sparse_scores.masked_fill_(is_all_neg_inf, 0.0)
 
             attn_weights = F.softmax(sparse_scores, dim=-1, dtype=torch.float32)
-            attn_weights = torch.nan_to_num(attn_weights, 0.0)
+            attn_weights.nan_to_num_(0.0)
             attn_weights = attn_weights.to(v.dtype)
             attn_weights = self.attn_dropout(attn_weights)
             out = torch.matmul(attn_weights, v)
@@ -440,10 +440,10 @@ class SurgicalLlamaAttention(nn.Module):
         
         # CRITICAL FIX: Prevent softmax NaN from all -inf rows (e.g. padded tokens getting fully masked)
         is_all_neg_inf = (sparse_scores == float('-inf')).all(dim=-1, keepdim=True)
-        sparse_scores = sparse_scores.masked_fill(is_all_neg_inf, 0.0)
+        sparse_scores.masked_fill_(is_all_neg_inf, 0.0)
         
         attn_weights = F.softmax(sparse_scores, dim=-1, dtype=torch.float32)
-        attn_weights = torch.nan_to_num(attn_weights, 0.0)
+        attn_weights.nan_to_num_(0.0)
 
         # Multiply by the differentiable soft mask for training
         attn_weights = attn_weights * full_mask
