@@ -1,0 +1,117 @@
+{
+  "meta": {
+    "date": "2026-10-03T14:48:21.888486+00:00",
+    "git_sha": "5fd16ef54e7bbd9ac9fbbd985ff92155bde54a7f",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "torch": "2.11.0+cu130",
+    "model_id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "args": {
+      "model_id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "depths": "2,3,4",
+      "max_samples": 30,
+      "max_ctx": 6000,
+      "max_new_tokens": 128,
+      "train_steps": 80,
+      "skip_warmup": false,
+      "init_mode": "collapse",
+      "no_window_baseline": false,
+      "seed": 0,
+      "output_dir": "experiments/results"
+    },
+    "n_samples": 30,
+    "n_truncated": 7,
+    "router": {
+      "tree_depth": 5,
+      "arity": 2,
+      "preserve_sinks": true,
+      "warmup": "wikitext-2 x 80 steps"
+    },
+    "metric": "LongBench qa_f1 (first line of prediction, max over references)"
+  },
+  "results": {
+    "dense": {
+      "f1": 46.810861916166346,
+      "f1_ci95": [
+        33.45750908180575,
+        60.96646811414252
+      ],
+      "n": 30,
+      "degenerate_outputs": 0
+    },
+    "routed@2": {
+      "f1": 48.64163035379749,
+      "f1_ci95": [
+        36.66588629993924,
+        61.48940693565671
+      ],
+      "n": 30,
+      "degenerate_outputs": 0,
+      "measured_allowed_fraction": 0.7113033497739194,
+      "theoretical_fraction": 0.25,
+      "minus_window_f1": 25.556036745268752,
+      "minus_window_ci95": [
+        11.736292406479372,
+        41.121181162033224
+      ]
+    },
+    "routed@3": {
+      "f1": 47.23215125348021,
+      "f1_ci95": [
+        35.817714491627534,
+        59.270419399213495
+      ],
+      "n": 30,
+      "degenerate_outputs": 0,
+      "measured_allowed_fraction": 0.6434669078230517,
+      "theoretical_fraction": 0.125,
+      "minus_window_f1": 26.087409980540656,
+      "minus_window_ci95": [
+        13.50488772578795,
+        39.49034086796861
+      ]
+    },
+    "routed@4": {
+      "f1": 36.19885696420072,
+      "f1_ci95": [
+        24.733013560701185,
+        47.79352785157738
+      ],
+      "n": 30,
+      "degenerate_outputs": 0,
+      "measured_allowed_fraction": 0.5910014897183248,
+      "theoretical_fraction": 0.0625,
+      "minus_window_f1": 15.89978663881461,
+      "minus_window_ci95": [
+        4.87412478391447,
+        28.496978878248232
+      ]
+    },
+    "window@2": {
+      "f1": 23.085593608528736,
+      "f1_ci95": [
+        12.510449320794148,
+        35.31695524213585
+      ],
+      "n": 30,
+      "degenerate_outputs": 0
+    },
+    "window@3": {
+      "f1": 21.144741272939555,
+      "f1_ci95": [
+        10.95653867583692,
+        33.52948994589861
+      ],
+      "n": 30,
+      "degenerate_outputs": 0
+    },
+    "window@4": {
+      "f1": 20.299070325386115,
+      "f1_ci95": [
+        9.737891737891738,
+        32.257759784075574
+      ],
+      "n": 30,
+      "degenerate_outputs": 0
+    }
+  }
+}
