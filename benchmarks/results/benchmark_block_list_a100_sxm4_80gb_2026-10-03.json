@@ -1,0 +1,3852 @@
+{
+  "meta": {
+    "timestamp_utc": "2026-10-03T14:53:50+00:00",
+    "git_sha": "d65a28fb4debfd37923135a6d4dd10121e9ee742",
+    "git_branch": "feat/block-list-kernel",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "compute_capability": "8.0",
+    "torch": "2.11.0+cu130",
+    "triton": "3.6.0",
+    "cuda": "13.0",
+    "other_process_gpu_mem_gb_at_start": 0.42,
+    "lib_import_error": null,
+    "config": {
+      "batch": 8,
+      "heads": 8,
+      "head_dim": 64,
+      "route_block": 128,
+      "p": 2,
+      "dtype": "float16",
+      "timer": "triton.testing.do_bench",
+      "warmup_ms": 25,
+      "rep_ms": 100,
+      "stat": "[median, p20, p80] ms",
+      "check_heads": 2,
+      "tol": 0.01,
+      "seed": 0
+    },
+    "notes": "lib_incl_build includes the lib wrapper's own list construction and .item() sync; compare it with list_plus_build. list is kernel-only with prebuilt lists."
+  },
+  "results": [
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 3,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 8,
+      "mean_count": 8.0,
+      "ms": {
+        "sdpa": [
+          0.13312000036239624,
+          0.13209599256515503,
+          0.13312000036239624
+        ],
+        "scan": [
+          0.2529279887676239,
+          0.2519040107727051,
+          0.2539519965648651
+        ],
+        "lib_incl_build": [
+          0.66457599401474,
+          0.6553599834442139,
+          0.681984007358551
+        ],
+        "list": [
+          0.14233599603176117,
+          0.14233599603176117,
+          0.14336000382900238
+        ],
+        "list_plus_build": [
+          0.9461759924888611,
+          0.92876797914505,
+          0.9789440035820007
+        ],
+        "build": [
+          0.6727679967880249,
+          0.6502400040626526,
+          0.6789119839668274
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.935,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0001278221607208252,
+        "scan": 0.00012084841728210449,
+        "lib": 0.00012665987014770508,
+        "sdpa": 0.00012084841728210449
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 3,
+      "density": 0.5,
+      "ideal_speedup_vs_own_dense": 2.0,
+      "max_count": 4,
+      "mean_count": 4.0,
+      "ms": {
+        "sdpa": [
+          0.13312000036239624,
+          0.13209599256515503,
+          0.13312000036239624
+        ],
+        "scan": [
+          0.1515520066022873,
+          0.15052799880504608,
+          0.1525759994983673
+        ],
+        "lib_incl_build": [
+          0.4971520006656647,
+          0.48025599122047424,
+          0.5107712149620056
+        ],
+        "list": [
+          0.08294399827718735,
+          0.08294399827718735,
+          0.08396799862384796
+        ],
+        "list_plus_build": [
+          0.8704000115394592,
+          0.8591359853744507,
+          0.8888319730758667
+        ],
+        "build": [
+          0.6783999800682068,
+          0.6625279784202576,
+          0.6887423992156982
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.605,
+      "speedup_list_vs_own_dense": 1.716,
+      "efficiency_vs_ideal": 0.858,
+      "max_abs_err": {
+        "list": 0.00017470121383666992,
+        "scan": 0.00017470121383666992,
+        "lib": 0.00017470121383666992
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 3,
+      "real_depth": 3,
+      "density": 0.125,
+      "ideal_speedup_vs_own_dense": 8.0,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          0.13312000036239624,
+          0.13209599256515503,
+          0.13312000036239624
+        ],
+        "scan": [
+          0.07782399654388428,
+          0.07680000364780426,
+          0.07884799689054489
+        ],
+        "lib_incl_build": [
+          0.46592000126838684,
+          0.447488009929657,
+          0.477183997631073
+        ],
+        "list": [
+          0.043007999658584595,
+          0.043007999658584595,
+          0.04505600035190582
+        ],
+        "list_plus_build": [
+          0.8284159898757935,
+          0.8185855746269226,
+          0.8341503977775574
+        ],
+        "build": [
+          0.6676480174064636,
+          0.6547455787658691,
+          0.683622419834137
+        ]
+      },
+      "speedup_list_vs_sdpa": 3.095,
+      "speedup_list_vs_own_dense": 3.31,
+      "efficiency_vs_ideal": 0.414,
+      "max_abs_err": {
+        "list": 0.00027740001678466797,
+        "scan": 0.00027740001678466797,
+        "lib": 0.00027740001678466797
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "random",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 3,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 8,
+      "mean_count": 8.0,
+      "ms": {
+        "sdpa": [
+          0.13312000036239624,
+          0.13209599256515503,
+          0.13312000036239624
+        ],
+        "scan": [
+          0.2529279887676239,
+          0.2519040107727051,
+          0.2539519965648651
+        ],
+        "lib_incl_build": [
+          0.5908480286598206,
+          0.5816320180892944,
+          0.6062080264091492
+        ],
+        "list": [
+          0.1740799993276596,
+          0.1730560064315796,
+          0.17510400712490082
+        ],
+        "list_plus_build": [
+          0.9226239919662476,
+          0.9082880020141602,
+          0.9328640103340149
+        ],
+        "build": [
+          0.6604800224304199,
+          0.6416383981704712,
+          0.6676480174064636
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.765,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0001278221607208252,
+        "scan": 0.00012084841728210449,
+        "lib": 0.00012665987014770508,
+        "sdpa": 0.00012084841728210449
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "random",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 3,
+      "density": 0.56885,
+      "ideal_speedup_vs_own_dense": 1.76,
+      "max_count": 7,
+      "mean_count": 4.55,
+      "ms": {
+        "sdpa": [
+          0.13312000036239624,
+          0.13209599256515503,
+          0.13312000036239624
+        ],
+        "scan": [
+          0.16179199516773224,
+          0.16076800227165222,
+          0.16383999586105347
+        ],
+        "lib_incl_build": [
+          0.5642240047454834,
+          0.5539839863777161,
+          0.5797888040542603
+        ],
+        "list": [
+          0.0942080020904541,
+          0.09318400174379349,
+          0.09523200243711472
+        ],
+        "list_plus_build": [
+          0.8724480271339417,
+          0.8630272150039673,
+          0.8880128145217895
+        ],
+        "build": [
+          0.6768640279769897,
+          0.6594560146331787,
+          0.6907904148101807
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.413,
+      "speedup_list_vs_own_dense": 1.848,
+      "efficiency_vs_ideal": 1.051,
+      "max_abs_err": {
+        "list": 0.0002384185791015625,
+        "scan": 0.0002384185791015625,
+        "lib": 0.0002384185791015625
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "random",
+      "causal": false,
+      "depth": 3,
+      "real_depth": 3,
+      "density": 0.23535,
+      "ideal_speedup_vs_own_dense": 4.25,
+      "max_count": 4,
+      "mean_count": 1.88,
+      "ms": {
+        "sdpa": [
+          0.13312000036239624,
+          0.13209599256515503,
+          0.13312000036239624
+        ],
+        "scan": [
+          0.10035199671983719,
+          0.09932799637317657,
+          0.1013759970664978
+        ],
+        "lib_incl_build": [
+          0.4843519926071167,
+          0.47206398844718933,
+          0.5048320293426514
+        ],
+        "list": [
+          0.06656000018119812,
+          0.0655359998345375,
+          0.06758400052785873
+        ],
+        "list_plus_build": [
+          0.8407040238380432,
+          0.8335360288619995,
+          0.8476672172546387
+        ],
+        "build": [
+          0.6656000018119812,
+          0.6481919884681702,
+          0.6727679967880249
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.0,
+      "speedup_list_vs_own_dense": 2.615,
+      "efficiency_vs_ideal": 0.616,
+      "max_abs_err": {
+        "list": 0.0002758502960205078,
+        "scan": 0.0002758502960205078,
+        "lib": 0.0002758502960205078
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 3,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 8,
+      "mean_count": 4.5,
+      "ms": {
+        "sdpa": [
+          0.09318400174379349,
+          0.09216000139713287,
+          0.09523200243711472
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.10342399775981903,
+          0.10239999741315842,
+          0.10547199845314026
+        ],
+        "list_plus_build": [
+          0.9451519846916199,
+          0.92876797914505,
+          0.9512959718704224
+        ],
+        "build": [
+          0.7219200134277344,
+          0.7014399766921997,
+          0.7301120162010193
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.901,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0009605884552001953,
+        "sdpa": 0.0009605884552001953
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 3,
+      "density": 0.55556,
+      "ideal_speedup_vs_own_dense": 1.8,
+      "max_count": 4,
+      "mean_count": 2.5,
+      "ms": {
+        "sdpa": [
+          0.09318400174379349,
+          0.09216000139713287,
+          0.09523200243711472
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.06860800087451935,
+          0.06758400052785873,
+          0.06963200122117996
+        ],
+        "list_plus_build": [
+          0.886784017086029,
+          0.869376003742218,
+          0.8980479836463928
+        ],
+        "build": [
+          0.7055360078811646,
+          0.6862847805023193,
+          0.7157760262489319
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.358,
+      "speedup_list_vs_own_dense": 1.507,
+      "efficiency_vs_ideal": 0.837,
+      "max_abs_err": {
+        "list": 0.0009605884552001953
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 3,
+      "real_depth": 3,
+      "density": 0.22222,
+      "ideal_speedup_vs_own_dense": 4.5,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          0.09318400174379349,
+          0.09216000139713287,
+          0.09523200243711472
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.04403200000524521,
+          0.043007999658584595,
+          0.04505600035190582
+        ],
+        "list_plus_build": [
+          0.8791040182113647,
+          0.8550400137901306,
+          0.886784017086029
+        ],
+        "build": [
+          0.711679995059967,
+          0.6957055926322937,
+          0.7460864186286926
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.116,
+      "speedup_list_vs_own_dense": 2.349,
+      "efficiency_vs_ideal": 0.522,
+      "max_abs_err": {
+        "list": 0.0009856224060058594
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "random",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 3,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 8,
+      "mean_count": 4.5,
+      "ms": {
+        "sdpa": [
+          0.09318400174379349,
+          0.09216000139713287,
+          0.09523200243711472
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.10342399775981903,
+          0.10199039727449419,
+          0.10444799810647964
+        ],
+        "list_plus_build": [
+          0.936959981918335,
+          0.9226239919662476,
+          0.9441279768943787
+        ],
+        "build": [
+          0.7178239822387695,
+          0.6993920207023621,
+          0.7249919772148132
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.901,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0009605884552001953,
+        "sdpa": 0.0009605884552001953
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "random",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 3,
+      "density": 0.61675,
+      "ideal_speedup_vs_own_dense": 1.62,
+      "max_count": 7,
+      "mean_count": 2.78,
+      "ms": {
+        "sdpa": [
+          0.09318400174379349,
+          0.09216000139713287,
+          0.09523200243711472
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.07372800260782242,
+          0.0727040022611618,
+          0.07475200295448303
+        ],
+        "list_plus_build": [
+          0.9103360176086426,
+          0.90071040391922,
+          0.9195520281791687
+        ],
+        "build": [
+          0.7208960056304932,
+          0.7096319794654846,
+          0.737280011177063
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.264,
+      "speedup_list_vs_own_dense": 1.403,
+      "efficiency_vs_ideal": 0.865,
+      "max_abs_err": {
+        "list": 0.0009605884552001953
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 1024,
+      "num_blocks": 8,
+      "pattern": "random",
+      "causal": true,
+      "depth": 3,
+      "real_depth": 3,
+      "density": 0.32031,
+      "ideal_speedup_vs_own_dense": 3.12,
+      "max_count": 4,
+      "mean_count": 1.44,
+      "ms": {
+        "sdpa": [
+          0.09318400174379349,
+          0.09216000139713287,
+          0.09523200243711472
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.05119999870657921,
+          0.05119999870657921,
+          0.05222399905323982
+        ],
+        "list_plus_build": [
+          0.8939520120620728,
+          0.8837119936943054,
+          0.899071991443634
+        ],
+        "build": [
+          0.7167999744415283,
+          0.7034879922866821,
+          0.7272447943687439
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.82,
+      "speedup_list_vs_own_dense": 2.02,
+      "efficiency_vs_ideal": 0.647,
+      "max_abs_err": {
+        "list": 0.0009856224060058594
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 4,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 16,
+      "mean_count": 16.0,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.7905279994010925,
+          0.7895039916038513,
+          0.7915520071983337
+        ],
+        "lib_incl_build": [
+          1.1806720495224,
+          1.1745280027389526,
+          1.1898880004882812
+        ],
+        "list": [
+          0.49459201097488403,
+          0.49459201097488403,
+          0.49561598896980286
+        ],
+        "list_plus_build": [
+          1.2984319925308228,
+          1.287168025970459,
+          1.3043712377548218
+        ],
+        "build": [
+          0.6860799789428711,
+          0.6715391874313354,
+          0.6963199973106384
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.818,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 6.745755672454834e-05,
+        "scan": 7.042288780212402e-05,
+        "lib": 7.134675979614258e-05,
+        "sdpa": 8.025765419006348e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 4,
+      "density": 0.5,
+      "ideal_speedup_vs_own_dense": 2.0,
+      "max_count": 8,
+      "mean_count": 8.0,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.4505600035190582,
+          0.4505600035190582,
+          0.45158401131629944
+        ],
+        "lib_incl_build": [
+          0.7884799838066101,
+          0.7823359966278076,
+          0.8019968152046203
+        ],
+        "list": [
+          0.26419198513031006,
+          0.26316800713539124,
+          0.26419198513031006
+        ],
+        "list_plus_build": [
+          1.067520022392273,
+          1.0547200441360474,
+          1.094655990600586
+        ],
+        "build": [
+          0.6712319850921631,
+          0.6543359756469727,
+          0.6797311902046204
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.531,
+      "speedup_list_vs_own_dense": 1.872,
+      "efficiency_vs_ideal": 0.936,
+      "max_abs_err": {
+        "list": 0.00013551115989685059,
+        "scan": 0.00013551115989685059,
+        "lib": 0.00011268258094787598
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 2,
+      "real_depth": 4,
+      "density": 0.25,
+      "ideal_speedup_vs_own_dense": 4.0,
+      "max_count": 4,
+      "mean_count": 4.0,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.2887679934501648,
+          0.2877439856529236,
+          0.289792001247406
+        ],
+        "lib_incl_build": [
+          0.5857279896736145,
+          0.5754879713058472,
+          0.6031360030174255
+        ],
+        "list": [
+          0.14950400590896606,
+          0.14950400590896606,
+          0.15052799880504608
+        ],
+        "list_plus_build": [
+          0.9390079975128174,
+          0.9308159947395325,
+          0.9472000002861023
+        ],
+        "build": [
+          0.6681600213050842,
+          0.6535168170928954,
+          0.6789119839668274
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.705,
+      "speedup_list_vs_own_dense": 3.308,
+      "efficiency_vs_ideal": 0.827,
+      "max_abs_err": {
+        "list": 0.00021916627883911133,
+        "scan": 0.00021916627883911133,
+        "lib": 0.00021916627883911133
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 4,
+      "real_depth": 4,
+      "density": 0.0625,
+      "ideal_speedup_vs_own_dense": 16.0,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.1730560064315796,
+          0.17203199863433838,
+          0.1740799993276596
+        ],
+        "lib_incl_build": [
+          0.48230400681495667,
+          0.4700160026550293,
+          0.49663999676704407
+        ],
+        "list": [
+          0.08191999793052673,
+          0.08089599758386612,
+          0.08191999793052673
+        ],
+        "list_plus_build": [
+          0.8632320165634155,
+          0.8581119775772095,
+          0.8683519959449768
+        ],
+        "build": [
+          0.66457599401474,
+          0.647167980670929,
+          0.6727679967880249
+        ]
+      },
+      "speedup_list_vs_sdpa": 4.938,
+      "speedup_list_vs_own_dense": 6.038,
+      "efficiency_vs_ideal": 0.377,
+      "max_abs_err": {
+        "list": 0.00035560131072998047,
+        "scan": 0.00035560131072998047,
+        "lib": 0.00035560131072998047
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 4,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 16,
+      "mean_count": 16.0,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.7905279994010925,
+          0.7895039916038513,
+          0.7911424040794373
+        ],
+        "lib_incl_build": [
+          1.1755520105361938,
+          1.1704319715499878,
+          1.1831295490264893
+        ],
+        "list": [
+          0.596992015838623,
+          0.596992015838623,
+          0.5980160236358643
+        ],
+        "list_plus_build": [
+          1.2902400493621826,
+          1.2785663604736328,
+          1.3019136190414429
+        ],
+        "build": [
+          0.6809599995613098,
+          0.6686720252037048,
+          0.6912000179290771
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.678,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 6.745755672454834e-05,
+        "scan": 7.042288780212402e-05,
+        "lib": 7.134675979614258e-05,
+        "sdpa": 8.025765419006348e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 4,
+      "density": 0.53308,
+      "ideal_speedup_vs_own_dense": 1.88,
+      "max_count": 14,
+      "mean_count": 8.53,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.4761599898338318,
+          0.47513601183891296,
+          0.477183997631073
+        ],
+        "lib_incl_build": [
+          1.0915839672088623,
+          1.0864640474319458,
+          1.103052830696106
+        ],
+        "list": [
+          0.2826240062713623,
+          0.2826240062713623,
+          0.2836480140686035
+        ],
+        "list_plus_build": [
+          1.0803200006484985,
+          1.0711040496826172,
+          1.0864640474319458
+        ],
+        "build": [
+          0.6717439889907837,
+          0.6574079990386963,
+          0.6799359917640686
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.431,
+      "speedup_list_vs_own_dense": 2.112,
+      "efficiency_vs_ideal": 1.126,
+      "max_abs_err": {
+        "list": 0.00012868642807006836,
+        "scan": 0.00012868642807006836,
+        "lib": 0.00012868642807006836
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": false,
+      "depth": 2,
+      "real_depth": 4,
+      "density": 0.29797,
+      "ideal_speedup_vs_own_dense": 3.36,
+      "max_count": 9,
+      "mean_count": 4.77,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.32051199674606323,
+          0.3184640109539032,
+          0.32256001234054565
+        ],
+        "lib_incl_build": [
+          0.8560640215873718,
+          0.8376320004463196,
+          0.8652799725532532
+        ],
+        "list": [
+          0.17817600071430206,
+          0.17715199291706085,
+          0.17919999361038208
+        ],
+        "list_plus_build": [
+          0.9687039852142334,
+          0.9584640264511108,
+          0.9752575755119324
+        ],
+        "build": [
+          0.6696959733963013,
+          0.652288019657135,
+          0.6789119839668274
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.27,
+      "speedup_list_vs_own_dense": 3.351,
+      "efficiency_vs_ideal": 0.998,
+      "max_abs_err": {
+        "list": 0.00028192996978759766,
+        "scan": 0.00028192996978759766,
+        "lib": 0.00028192996978759766
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": false,
+      "depth": 4,
+      "real_depth": 4,
+      "density": 0.11499,
+      "ideal_speedup_vs_own_dense": 8.7,
+      "max_count": 4,
+      "mean_count": 1.84,
+      "ms": {
+        "sdpa": [
+          0.4044800102710724,
+          0.4044800102710724,
+          0.4055039882659912
+        ],
+        "scan": [
+          0.20070399343967438,
+          0.19865599274635315,
+          0.2027519941329956
+        ],
+        "lib_incl_build": [
+          0.5867519974708557,
+          0.5775359869003296,
+          0.6029312014579773
+        ],
+        "list": [
+          0.11161600053310394,
+          0.11059200018644333,
+          0.11264000087976456
+        ],
+        "list_plus_build": [
+          0.8652799725532532,
+          0.8611840009689331,
+          0.8908799886703491
+        ],
+        "build": [
+          0.6727679967880249,
+          0.6543359756469727,
+          0.6795263886451721
+        ]
+      },
+      "speedup_list_vs_sdpa": 3.624,
+      "speedup_list_vs_own_dense": 5.349,
+      "efficiency_vs_ideal": 0.615,
+      "max_abs_err": {
+        "list": 0.0002969503402709961,
+        "scan": 0.0002969503402709961,
+        "lib": 0.0002969503402709961
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 4,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 16,
+      "mean_count": 8.5,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.3850240111351013,
+          0.32153600454330444,
+          0.3887104094028473
+        ],
+        "list_plus_build": [
+          1.154047966003418,
+          1.1458560228347778,
+          1.1622400283813477
+        ],
+        "build": [
+          0.7219200134277344,
+          0.7024639844894409,
+          0.749567985534668
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.668,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0005408525466918945,
+        "sdpa": 0.0005408525466918945
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 4,
+      "density": 0.52941,
+      "ideal_speedup_vs_own_dense": 1.89,
+      "max_count": 8,
+      "mean_count": 4.5,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.18227200210094452,
+          0.1812479943037033,
+          0.18432000279426575
+        ],
+        "list_plus_build": [
+          1.018880009651184,
+          1.0094592571258545,
+          1.0250240564346313
+        ],
+        "build": [
+          0.7137280106544495,
+          0.6922240257263184,
+          0.7208960056304932
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.41,
+      "speedup_list_vs_own_dense": 2.112,
+      "efficiency_vs_ideal": 1.118,
+      "max_abs_err": {
+        "list": 0.0007226467132568359
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 2,
+      "real_depth": 4,
+      "density": 0.29412,
+      "ideal_speedup_vs_own_dense": 3.4,
+      "max_count": 4,
+      "mean_count": 2.5,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.11776000261306763,
+          0.11673600226640701,
+          0.11878400295972824
+        ],
+        "list_plus_build": [
+          0.9553920030593872,
+          0.946995198726654,
+          0.9646080136299133
+        ],
+        "build": [
+          0.7157760262489319,
+          0.7024639844894409,
+          0.7239680290222168
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.183,
+      "speedup_list_vs_own_dense": 3.27,
+      "efficiency_vs_ideal": 0.962,
+      "max_abs_err": {
+        "list": 0.0009837150573730469
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 4,
+      "real_depth": 4,
+      "density": 0.11765,
+      "ideal_speedup_vs_own_dense": 8.5,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.06963200122117996,
+          0.06963200122117996,
+          0.07065600156784058
+        ],
+        "list_plus_build": [
+          0.9000959992408752,
+          0.8888319730758667,
+          0.9052159786224365
+        ],
+        "build": [
+          0.7260159850120544,
+          0.711679995059967,
+          0.738099217414856
+        ]
+      },
+      "speedup_list_vs_sdpa": 3.691,
+      "speedup_list_vs_own_dense": 5.529,
+      "efficiency_vs_ideal": 0.651,
+      "max_abs_err": {
+        "list": 0.0009837150573730469
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 4,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 16,
+      "mean_count": 8.5,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.31539198756217957,
+          0.31334400177001953,
+          0.3184640109539032
+        ],
+        "list_plus_build": [
+          1.1750400066375732,
+          1.1622400283813477,
+          1.1980799436569214
+        ],
+        "build": [
+          0.7208960056304932,
+          0.7065600156784058,
+          0.7464960217475891
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.815,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0005408525466918945,
+        "sdpa": 0.0005408525466918945
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 4,
+      "density": 0.56055,
+      "ideal_speedup_vs_own_dense": 1.78,
+      "max_count": 14,
+      "mean_count": 4.76,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.19251200556755066,
+          0.19046400487422943,
+          0.19353599846363068
+        ],
+        "list_plus_build": [
+          1.0301439762115479,
+          1.0235904455184937,
+          1.0375168323516846
+        ],
+        "build": [
+          0.7137280106544495,
+          0.6983680129051208,
+          0.7229440212249756
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.335,
+      "speedup_list_vs_own_dense": 1.638,
+      "efficiency_vs_ideal": 0.918,
+      "max_abs_err": {
+        "list": 0.0008513927459716797
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": true,
+      "depth": 2,
+      "real_depth": 4,
+      "density": 0.33927,
+      "ideal_speedup_vs_own_dense": 2.95,
+      "max_count": 9,
+      "mean_count": 2.88,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.13209599256515503,
+          0.131071999669075,
+          0.13312000036239624
+        ],
+        "list_plus_build": [
+          0.9676799774169922,
+          0.9580544233322144,
+          0.9738240242004395
+        ],
+        "build": [
+          0.7096319794654846,
+          0.6891520023345947,
+          0.7155712246894836
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.946,
+      "speedup_list_vs_own_dense": 2.388,
+      "efficiency_vs_ideal": 0.81,
+      "max_abs_err": {
+        "list": 0.0008513927459716797
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 2048,
+      "num_blocks": 16,
+      "pattern": "random",
+      "causal": true,
+      "depth": 4,
+      "real_depth": 4,
+      "density": 0.16705,
+      "ideal_speedup_vs_own_dense": 5.99,
+      "max_count": 4,
+      "mean_count": 1.42,
+      "ms": {
+        "sdpa": [
+          0.25702399015426636,
+          0.2539519965648651,
+          0.2611199915409088
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.08499199897050858,
+          0.08396799862384796,
+          0.08499199897050858
+        ],
+        "list_plus_build": [
+          0.9149439930915833,
+          0.9082880020141602,
+          0.9215999841690063
+        ],
+        "build": [
+          0.7055360078811646,
+          0.6830080151557922,
+          0.711679995059967
+        ]
+      },
+      "speedup_list_vs_sdpa": 3.024,
+      "speedup_list_vs_own_dense": 3.711,
+      "efficiency_vs_ideal": 0.62,
+      "max_abs_err": {
+        "list": 0.0009837150573730469
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 5,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 32,
+      "mean_count": 32.0,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          2.9286398887634277,
+          2.9265921115875244,
+          2.93068790435791
+        ],
+        "lib_incl_build": [
+          3.528191924095154,
+          3.522559881210327,
+          3.545088052749634
+        ],
+        "list": [
+          1.9077119827270508,
+          1.9056639671325684,
+          1.9169280529022217
+        ],
+        "list_plus_build": [
+          2.7141119241714478,
+          2.7011072635650635,
+          2.721177577972412
+        ],
+        "build": [
+          0.6707199811935425,
+          0.6555647850036621,
+          0.6778879761695862
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.807,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 6.00963830947876e-05,
+        "scan": 6.00963830947876e-05,
+        "lib": 6.489455699920654e-05,
+        "sdpa": 6.489455699920654e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 5,
+      "density": 0.5,
+      "ideal_speedup_vs_own_dense": 2.0,
+      "max_count": 16,
+      "mean_count": 16.0,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          1.6455680131912231,
+          1.6414719820022583,
+          1.649664044380188
+        ],
+        "lib_incl_build": [
+          1.9967999458312988,
+          1.9910656213760376,
+          2.0125696659088135
+        ],
+        "list": [
+          0.9922559857368469,
+          0.9922559857368469,
+          0.9932799935340881
+        ],
+        "list_plus_build": [
+          1.771008014678955,
+          1.755340814590454,
+          1.7784831523895264
+        ],
+        "build": [
+          0.6758400201797485,
+          0.6516736149787903,
+          0.6850559711456299
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.552,
+      "speedup_list_vs_own_dense": 1.923,
+      "efficiency_vs_ideal": 0.961,
+      "max_abs_err": {
+        "list": 7.325410842895508e-05,
+        "scan": 7.702410221099854e-05,
+        "lib": 8.942186832427979e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 2,
+      "real_depth": 5,
+      "density": 0.25,
+      "ideal_speedup_vs_own_dense": 4.0,
+      "max_count": 8,
+      "mean_count": 8.0,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          1.0301439762115479,
+          1.0280959606170654,
+          1.031167984008789
+        ],
+        "lib_incl_build": [
+          1.21343994140625,
+          1.2093440294265747,
+          1.2257280349731445
+        ],
+        "list": [
+          0.5212159752845764,
+          0.52019202709198,
+          0.5212159752845764
+        ],
+        "list_plus_build": [
+          1.316864013671875,
+          1.3056000471115112,
+          1.325875163078308
+        ],
+        "build": [
+          0.6783999800682068,
+          0.6559743881225586,
+          0.6881279945373535
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.955,
+      "speedup_list_vs_own_dense": 3.66,
+      "efficiency_vs_ideal": 0.915,
+      "max_abs_err": {
+        "list": 0.00011995434761047363,
+        "scan": 0.00011995434761047363,
+        "lib": 0.00011995434761047363
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 5,
+      "real_depth": 5,
+      "density": 0.03125,
+      "ideal_speedup_vs_own_dense": 32.0,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          0.5468159914016724,
+          0.5447679758071899,
+          0.5478399991989136
+        ],
+        "lib_incl_build": [
+          0.4853760004043579,
+          0.4689919948577881,
+          0.4976640045642853
+        ],
+        "list": [
+          0.11878400295972824,
+          0.11776000261306763,
+          0.11980800330638885
+        ],
+        "list_plus_build": [
+          0.8995839953422546,
+          0.881663978099823,
+          0.9103360176086426
+        ],
+        "build": [
+          0.6696959733963013,
+          0.6502400040626526,
+          0.6758400201797485
+        ]
+      },
+      "speedup_list_vs_sdpa": 12.966,
+      "speedup_list_vs_own_dense": 16.06,
+      "efficiency_vs_ideal": 0.502,
+      "max_abs_err": {
+        "list": 0.0004496574401855469,
+        "scan": 0.0004496574401855469,
+        "lib": 0.0004496574401855469
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 5,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 32,
+      "mean_count": 32.0,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          2.93068790435791,
+          2.9276158809661865,
+          2.9335551261901855
+        ],
+        "lib_incl_build": [
+          3.5348479747772217,
+          3.5297279357910156,
+          3.5543038845062256
+        ],
+        "list": [
+          1.9066879749298096,
+          1.9056639671325684,
+          1.9077119827270508
+        ],
+        "list_plus_build": [
+          2.717695951461792,
+          2.7029504776000977,
+          2.731417655944824
+        ],
+        "build": [
+          0.6686720252037048,
+          0.6492159962654114,
+          0.6758400201797485
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.808,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 6.00963830947876e-05,
+        "scan": 6.00963830947876e-05,
+        "lib": 6.489455699920654e-05,
+        "sdpa": 6.489455699920654e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 5,
+      "density": 0.51813,
+      "ideal_speedup_vs_own_dense": 1.93,
+      "max_count": 23,
+      "mean_count": 16.58,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          1.6926720142364502,
+          1.6881663799285889,
+          1.6957440376281738
+        ],
+        "lib_incl_build": [
+          2.6664960384368896,
+          2.6578943729400635,
+          2.678783893585205
+        ],
+        "list": [
+          1.0383360385894775,
+          1.0362880229949951,
+          1.04038405418396
+        ],
+        "list_plus_build": [
+          1.8472959995269775,
+          1.8427903652191162,
+          1.8565119504928589
+        ],
+        "build": [
+          0.6758400201797485,
+          0.6574079990386963,
+          0.681984007358551
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.483,
+      "speedup_list_vs_own_dense": 1.836,
+      "efficiency_vs_ideal": 0.951,
+      "max_abs_err": {
+        "list": 0.00011453032493591309,
+        "scan": 0.00011453032493591309,
+        "lib": 0.00011453032493591309
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": false,
+      "depth": 2,
+      "real_depth": 5,
+      "density": 0.27551,
+      "ideal_speedup_vs_own_dense": 3.63,
+      "max_count": 17,
+      "mean_count": 8.82,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          1.0557440519332886,
+          1.0536960363388062,
+          1.0577919483184814
+        ],
+        "lib_incl_build": [
+          2.0776960849761963,
+          2.067456007003784,
+          2.087526321411133
+        ],
+        "list": [
+          0.5765119791030884,
+          0.5754879713058472,
+          0.5775359869003296
+        ],
+        "list_plus_build": [
+          1.3844480514526367,
+          1.3637632131576538,
+          1.392844796180725
+        ],
+        "build": [
+          0.6824960112571716,
+          0.659660816192627,
+          0.6891520023345947
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.671,
+      "speedup_list_vs_own_dense": 3.307,
+      "efficiency_vs_ideal": 0.911,
+      "max_abs_err": {
+        "list": 0.00019687414169311523,
+        "scan": 0.00019687414169311523,
+        "lib": 0.00019687414169311523
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": false,
+      "depth": 5,
+      "real_depth": 5,
+      "density": 0.06107,
+      "ideal_speedup_vs_own_dense": 16.38,
+      "max_count": 6,
+      "mean_count": 1.95,
+      "ms": {
+        "sdpa": [
+          1.5400960445404053,
+          1.5237120389938354,
+          1.5411200523376465
+        ],
+        "scan": [
+          0.5836799740791321,
+          0.5816320180892944,
+          0.5857279896736145
+        ],
+        "lib_incl_build": [
+          1.0250240564346313,
+          1.0106879472732544,
+          1.0838016271591187
+        ],
+        "list": [
+          0.1740799993276596,
+          0.1730560064315796,
+          0.17612800002098083
+        ],
+        "list_plus_build": [
+          0.9646080136299133,
+          0.9533439874649048,
+          0.9738240242004395
+        ],
+        "build": [
+          0.6696959733963013,
+          0.651468813419342,
+          0.6789119839668274
+        ]
+      },
+      "speedup_list_vs_sdpa": 8.847,
+      "speedup_list_vs_own_dense": 10.953,
+      "efficiency_vs_ideal": 0.669,
+      "max_abs_err": {
+        "list": 0.00033462047576904297,
+        "scan": 0.00033462047576904297,
+        "lib": 0.00033462047576904297
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 5,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 32,
+      "mean_count": 16.5,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          1.1223039627075195,
+          1.1151360273361206,
+          1.127833604812622
+        ],
+        "list_plus_build": [
+          1.9553279876708984,
+          1.942732810974121,
+          1.9654655456542969
+        ],
+        "build": [
+          0.7152640223503113,
+          0.6983680129051208,
+          0.7219200134277344
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.932,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0007579326629638672,
+        "sdpa": 0.0007579326629638672
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 5,
+      "density": 0.51515,
+      "ideal_speedup_vs_own_dense": 1.94,
+      "max_count": 16,
+      "mean_count": 8.5,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.5990399718284607,
+          0.5959680080413818,
+          0.6021119952201843
+        ],
+        "list_plus_build": [
+          1.4315520524978638,
+          1.4196735620498657,
+          1.4403584003448486
+        ],
+        "build": [
+          0.7147520184516907,
+          0.6955007910728455,
+          0.7229440212249756
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.745,
+      "speedup_list_vs_own_dense": 1.874,
+      "efficiency_vs_ideal": 0.965,
+      "max_abs_err": {
+        "list": 0.0007789134979248047
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 2,
+      "real_depth": 5,
+      "density": 0.27273,
+      "ideal_speedup_vs_own_dense": 3.67,
+      "max_count": 8,
+      "mean_count": 4.5,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.3409920036792755,
+          0.3389439880847931,
+          0.3420160114765167
+        ],
+        "list_plus_build": [
+          1.176576018333435,
+          1.1663360595703125,
+          1.1819008350372315
+        ],
+        "build": [
+          0.711679995059967,
+          0.6973440051078796,
+          0.7393280267715454
+        ]
+      },
+      "speedup_list_vs_sdpa": 3.066,
+      "speedup_list_vs_own_dense": 3.291,
+      "efficiency_vs_ideal": 0.898,
+      "max_abs_err": {
+        "list": 0.0007941722869873047
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 5,
+      "real_depth": 5,
+      "density": 0.06061,
+      "ideal_speedup_vs_own_dense": 16.5,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.12185599654912949,
+          0.11980800330638885,
+          0.1228799968957901
+        ],
+        "list_plus_build": [
+          0.9441279768943787,
+          0.9359359741210938,
+          0.9492480158805847
+        ],
+        "build": [
+          0.7055360078811646,
+          0.6891520023345947,
+          0.7167999744415283
+        ]
+      },
+      "speedup_list_vs_sdpa": 8.58,
+      "speedup_list_vs_own_dense": 9.21,
+      "efficiency_vs_ideal": 0.558,
+      "max_abs_err": {
+        "list": 0.0010399818420410156
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 5,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 32,
+      "mean_count": 16.5,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          1.1161600351333618,
+          1.1077631711959839,
+          1.124351978302002
+        ],
+        "list_plus_build": [
+          1.9374079704284668,
+          1.9199999570846558,
+          1.9466240406036377
+        ],
+        "build": [
+          0.711679995059967,
+          0.6930431842803955,
+          0.719052791595459
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.937,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0007579326629638672,
+        "sdpa": 0.0007579326629638672
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 5,
+      "density": 0.53273,
+      "ideal_speedup_vs_own_dense": 1.88,
+      "max_count": 23,
+      "mean_count": 8.79,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.6164479851722717,
+          0.6123520135879517,
+          0.6205440163612366
+        ],
+        "list_plus_build": [
+          1.457152009010315,
+          1.4417920112609863,
+          1.465343952178955
+        ],
+        "build": [
+          0.7178239822387695,
+          0.6993920207023621,
+          0.7557119727134705
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.696,
+      "speedup_list_vs_own_dense": 1.811,
+      "efficiency_vs_ideal": 0.965,
+      "max_abs_err": {
+        "list": 0.0008904933929443359
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": true,
+      "depth": 2,
+      "real_depth": 5,
+      "density": 0.29747,
+      "ideal_speedup_vs_own_dense": 3.36,
+      "max_count": 17,
+      "mean_count": 4.91,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.3676159977912903,
+          0.36556801199913025,
+          0.3686400055885315
+        ],
+        "list_plus_build": [
+          1.2113920450210571,
+          1.2001279592514038,
+          1.2154879570007324
+        ],
+        "build": [
+          0.7229440212249756,
+          0.7053312063217163,
+          0.7460864186286926
+        ]
+      },
+      "speedup_list_vs_sdpa": 2.844,
+      "speedup_list_vs_own_dense": 3.036,
+      "efficiency_vs_ideal": 0.903,
+      "max_abs_err": {
+        "list": 0.0008904933929443359
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 4096,
+      "num_blocks": 32,
+      "pattern": "random",
+      "causal": true,
+      "depth": 5,
+      "real_depth": 5,
+      "density": 0.08952,
+      "ideal_speedup_vs_own_dense": 11.17,
+      "max_count": 6,
+      "mean_count": 1.48,
+      "ms": {
+        "sdpa": [
+          1.0455039739608765,
+          1.0362880229949951,
+          1.0547200441360474
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.15564799308776855,
+          0.15462400019168854,
+          0.15667200088500977
+        ],
+        "list_plus_build": [
+          0.997376024723053,
+          0.9863168001174927,
+          1.0035200119018555
+        ],
+        "build": [
+          0.7270399928092957,
+          0.7096319794654846,
+          0.7391232252120972
+        ]
+      },
+      "speedup_list_vs_sdpa": 6.717,
+      "speedup_list_vs_own_dense": 7.171,
+      "efficiency_vs_ideal": 0.642,
+      "max_abs_err": {
+        "list": 0.0009503364562988281
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 6,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 64,
+      "mean_count": 64.0,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          11.361791610717773,
+          11.34796772003174,
+          11.383193969726562
+        ],
+        "lib_incl_build": [
+          12.44979190826416,
+          12.433203315734863,
+          12.490342140197754
+        ],
+        "list": [
+          7.522304058074951,
+          7.522304058074951,
+          7.523327827453613
+        ],
+        "list_plus_build": [
+          8.279040336608887,
+          8.268799781799316,
+          8.31385612487793
+        ],
+        "build": [
+          0.6840320229530334,
+          0.6688768148422242,
+          0.694271981716156
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.817,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 3.8295984268188477e-05,
+        "scan": 3.8295984268188477e-05,
+        "lib": 3.8295984268188477e-05,
+        "sdpa": 4.315376281738281e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 6,
+      "density": 0.5,
+      "ideal_speedup_vs_own_dense": 2.0,
+      "max_count": 32,
+      "mean_count": 32.0,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          6.271999835968018,
+          6.269951820373535,
+          6.274252700805665
+        ],
+        "lib_incl_build": [
+          6.484992027282715,
+          6.479462623596191,
+          6.494412708282471
+        ],
+        "list": [
+          3.808255910873413,
+          3.807231903076172,
+          3.8094847202301025
+        ],
+        "list_plus_build": [
+          4.585983991622925,
+          4.577280044555664,
+          4.5940735816955565
+        ],
+        "build": [
+          0.6835200190544128,
+          0.6649855971336365,
+          0.6932479739189148
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.614,
+      "speedup_list_vs_own_dense": 1.975,
+      "efficiency_vs_ideal": 0.988,
+      "max_abs_err": {
+        "list": 6.107985973358154e-05,
+        "scan": 6.107985973358154e-05,
+        "lib": 6.107985973358154e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 3,
+      "real_depth": 6,
+      "density": 0.125,
+      "ideal_speedup_vs_own_dense": 8.0,
+      "max_count": 8,
+      "mean_count": 8.0,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          2.6265599727630615,
+          2.6204159259796143,
+          2.6306560039520264
+        ],
+        "lib_incl_build": [
+          2.012160062789917,
+          2.008883237838745,
+          2.0305919647216797
+        ],
+        "list": [
+          1.0240000486373901,
+          1.022976040840149,
+          1.0240000486373901
+        ],
+        "list_plus_build": [
+          1.8288639783859253,
+          1.8186240196228027,
+          1.840127944946289
+        ],
+        "build": [
+          0.6778879761695862,
+          0.657203197479248,
+          0.6891520023345947
+        ]
+      },
+      "speedup_list_vs_sdpa": 6.001,
+      "speedup_list_vs_own_dense": 7.346,
+      "efficiency_vs_ideal": 0.918,
+      "max_abs_err": {
+        "list": 0.0001308917999267578,
+        "scan": 0.0001308917999267578,
+        "lib": 0.0001308917999267578
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 6,
+      "real_depth": 6,
+      "density": 0.01562,
+      "ideal_speedup_vs_own_dense": 64.0,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          1.9660799503326416,
+          1.9630080461502075,
+          1.9691519737243652
+        ],
+        "lib_incl_build": [
+          0.6154239773750305,
+          0.6039552092552185,
+          0.6277120113372803
+        ],
+        "list": [
+          0.2170879989862442,
+          0.21606400609016418,
+          0.21913599967956543
+        ],
+        "list_plus_build": [
+          1.0219520330429077,
+          1.006592035293579,
+          1.0817536115646362
+        ],
+        "build": [
+          0.6860799789428711,
+          0.6668288111686707,
+          0.6932479739189148
+        ]
+      },
+      "speedup_list_vs_sdpa": 28.307,
+      "speedup_list_vs_own_dense": 34.651,
+      "efficiency_vs_ideal": 0.541,
+      "max_abs_err": {
+        "list": 0.0003561973571777344,
+        "scan": 0.0003561973571777344,
+        "lib": 0.0003561973571777344
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 6,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 64,
+      "mean_count": 64.0,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          11.341311931610107,
+          11.338137245178224,
+          11.34714870452881
+        ],
+        "lib_incl_build": [
+          12.434432029724121,
+          12.422758102416992,
+          12.438733100891113
+        ],
+        "list": [
+          7.523327827453613,
+          7.521279811859131,
+          7.523327827453613
+        ],
+        "list_plus_build": [
+          8.344575881958008,
+          8.333312034606934,
+          8.348671913146973
+        ],
+        "build": [
+          0.677376002073288,
+          0.6592512130737305,
+          0.6881279945373535
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.817,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 3.8295984268188477e-05,
+        "scan": 3.8295984268188477e-05,
+        "lib": 3.8295984268188477e-05,
+        "sdpa": 4.315376281738281e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 6,
+      "density": 0.50679,
+      "ideal_speedup_vs_own_dense": 1.97,
+      "max_count": 42,
+      "mean_count": 32.43,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          6.337535858154297,
+          6.327091217041016,
+          6.347775936126709
+        ],
+        "lib_incl_build": [
+          8.341504096984863,
+          8.333312034606934,
+          8.347647666931152
+        ],
+        "list": [
+          3.9198720455169678,
+          3.910655975341797,
+          3.926016092300415
+        ],
+        "list_plus_build": [
+          4.683776140213013,
+          4.668211174011231,
+          4.692787170410156
+        ],
+        "build": [
+          0.6789119839668274,
+          0.6604800224304199,
+          0.6901760101318359
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.568,
+      "speedup_list_vs_own_dense": 1.919,
+      "efficiency_vs_ideal": 0.973,
+      "max_abs_err": {
+        "list": 7.101893424987793e-05,
+        "scan": 7.101893424987793e-05,
+        "lib": 7.101893424987793e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": false,
+      "depth": 3,
+      "real_depth": 6,
+      "density": 0.13785,
+      "ideal_speedup_vs_own_dense": 7.25,
+      "max_count": 17,
+      "mean_count": 8.82,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          2.6521599292755127,
+          2.648883104324341,
+          2.6552319526672363
+        ],
+        "lib_incl_build": [
+          3.6966400146484375,
+          3.6849663257598877,
+          3.704012870788574
+        ],
+        "list": [
+          1.1212799549102783,
+          1.1192320585250854,
+          1.124351978302002
+        ],
+        "list_plus_build": [
+          1.955839991569519,
+          1.9398655891418457,
+          2.120499134063721
+        ],
+        "build": [
+          0.6860799789428711,
+          0.6748160123825073,
+          0.6963199973106384
+        ]
+      },
+      "speedup_list_vs_sdpa": 5.48,
+      "speedup_list_vs_own_dense": 6.71,
+      "efficiency_vs_ideal": 0.925,
+      "max_abs_err": {
+        "list": 0.00013568997383117676,
+        "scan": 0.000132828950881958,
+        "lib": 0.000132828950881958
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": false,
+      "depth": 6,
+      "real_depth": 6,
+      "density": 0.03075,
+      "ideal_speedup_vs_own_dense": 32.52,
+      "max_count": 6,
+      "mean_count": 1.97,
+      "ms": {
+        "sdpa": [
+          6.145023822784424,
+          6.1235198974609375,
+          6.150144100189209
+        ],
+        "scan": [
+          2.0183041095733643,
+          2.016256093978882,
+          2.021375894546509
+        ],
+        "lib_incl_build": [
+          1.632256031036377,
+          1.6261119842529297,
+          1.6449536085128784
+        ],
+        "list": [
+          0.32972800731658936,
+          0.32870399951934814,
+          0.32972800731658936
+        ],
+        "list_plus_build": [
+          1.1489280462265015,
+          1.1333632469177246,
+          1.159168004989624
+        ],
+        "build": [
+          0.6952959895133972,
+          0.6778879761695862,
+          0.7034879922866821
+        ]
+      },
+      "speedup_list_vs_sdpa": 18.637,
+      "speedup_list_vs_own_dense": 22.817,
+      "efficiency_vs_ideal": 0.702,
+      "max_abs_err": {
+        "list": 0.0003561973571777344,
+        "scan": 0.0003561973571777344,
+        "lib": 0.0003561973571777344
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 6,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 64,
+      "mean_count": 32.5,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          4.225536108016968,
+          4.210892868041992,
+          4.2481663703918455
+        ],
+        "list_plus_build": [
+          5.059584140777588,
+          5.050163269042969,
+          5.069619178771973
+        ],
+        "build": [
+          0.7280640006065369,
+          0.711679995059967,
+          0.7401471853256226
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.767,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0007009506225585938,
+        "sdpa": 0.0007009506225585938
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 6,
+      "density": 0.50769,
+      "ideal_speedup_vs_own_dense": 1.97,
+      "max_count": 32,
+      "mean_count": 16.5,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          2.1862399578094482,
+          2.1704704761505127,
+          2.1972992420196533
+        ],
+        "list_plus_build": [
+          3.034111976623535,
+          3.017728090286255,
+          3.052544116973877
+        ],
+        "build": [
+          0.7342079877853394,
+          0.7211008071899414,
+          0.7434239983558655
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.483,
+      "speedup_list_vs_own_dense": 1.933,
+      "efficiency_vs_ideal": 0.981,
+      "max_abs_err": {
+        "list": 0.0007009506225585938
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 3,
+      "real_depth": 6,
+      "density": 0.13846,
+      "ideal_speedup_vs_own_dense": 7.22,
+      "max_count": 8,
+      "mean_count": 4.5,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.6502400040626526,
+          0.6481919884681702,
+          0.6533120274543762
+        ],
+        "list_plus_build": [
+          1.5185920000076294,
+          1.511423945426941,
+          1.5351808071136475
+        ],
+        "build": [
+          0.7321599721908569,
+          0.719871997833252,
+          0.7423999905586243
+        ]
+      },
+      "speedup_list_vs_sdpa": 4.987,
+      "speedup_list_vs_own_dense": 6.498,
+      "efficiency_vs_ideal": 0.9,
+      "max_abs_err": {
+        "list": 0.0009608268737792969
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 6,
+      "real_depth": 6,
+      "density": 0.03077,
+      "ideal_speedup_vs_own_dense": 32.5,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.22220799326896667,
+          0.22015999257564545,
+          0.2236415982246399
+        ],
+        "list_plus_build": [
+          1.0777599811553955,
+          1.066803216934204,
+          1.094655990600586
+        ],
+        "build": [
+          0.7352319955825806,
+          0.7229440212249756,
+          0.7450624108314514
+        ]
+      },
+      "speedup_list_vs_sdpa": 14.592,
+      "speedup_list_vs_own_dense": 19.016,
+      "efficiency_vs_ideal": 0.585,
+      "max_abs_err": {
+        "list": 0.0010793209075927734
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 6,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 64,
+      "mean_count": 32.5,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          4.23475193977356,
+          4.220313549041748,
+          4.248371124267578
+        ],
+        "list_plus_build": [
+          5.080063819885254,
+          5.062655925750732,
+          5.1068929672241214
+        ],
+        "build": [
+          0.7311360239982605,
+          0.7178239822387695,
+          0.7403519749641418
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.766,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0007009506225585938,
+        "sdpa": 0.0007009506225585938
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 6,
+      "density": 0.51438,
+      "ideal_speedup_vs_own_dense": 1.94,
+      "max_count": 42,
+      "mean_count": 16.72,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          2.1975040435791016,
+          2.190335988998413,
+          2.2077438831329346
+        ],
+        "list_plus_build": [
+          3.2286720275878906,
+          3.0980095863342285,
+          3.4041855335235596
+        ],
+        "build": [
+          0.7429119944572449,
+          0.7251967787742615,
+          0.7729151844978333
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.476,
+      "speedup_list_vs_own_dense": 1.927,
+      "efficiency_vs_ideal": 0.991,
+      "max_abs_err": {
+        "list": 0.0007009506225585938
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": true,
+      "depth": 3,
+      "real_depth": 6,
+      "density": 0.15111,
+      "ideal_speedup_vs_own_dense": 6.62,
+      "max_count": 17,
+      "mean_count": 4.91,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.7127040028572083,
+          0.7096319794654846,
+          0.7167999744415283
+        ],
+        "list_plus_build": [
+          1.5861760377883911,
+          1.5724544525146484,
+          1.6138240098953247
+        ],
+        "build": [
+          0.7321599721908569,
+          0.7157760262489319,
+          0.7423999905586243
+        ]
+      },
+      "speedup_list_vs_sdpa": 4.55,
+      "speedup_list_vs_own_dense": 5.942,
+      "efficiency_vs_ideal": 0.898,
+      "max_abs_err": {
+        "list": 0.0009653568267822266
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 8192,
+      "num_blocks": 64,
+      "pattern": "random",
+      "causal": true,
+      "depth": 6,
+      "real_depth": 6,
+      "density": 0.04567,
+      "ideal_speedup_vs_own_dense": 21.9,
+      "max_count": 6,
+      "mean_count": 1.48,
+      "ms": {
+        "sdpa": [
+          3.2424960136413574,
+          3.206758499145508,
+          3.2706560611724855
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.2836480140686035,
+          0.2826240062713623,
+          0.28569599986076355
+        ],
+        "list_plus_build": [
+          1.1412479877471924,
+          1.1274240016937256,
+          1.1571199893951416
+        ],
+        "build": [
+          0.7429119944572449,
+          0.7276543974876404,
+          0.9267200231552124
+        ]
+      },
+      "speedup_list_vs_sdpa": 11.431,
+      "speedup_list_vs_own_dense": 14.93,
+      "efficiency_vs_ideal": 0.682,
+      "max_abs_err": {
+        "list": 0.0010793209075927734
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 7,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 128,
+      "mean_count": 128.0,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          44.86297607421875,
+          44.85898208618164,
+          44.86697006225586
+        ],
+        "lib_incl_build": [
+          48.34355354309082,
+          48.313140869140625,
+          48.373966217041016
+        ],
+        "list": [
+          30.113792419433594,
+          29.987225341796876,
+          30.11502151489258
+        ],
+        "list_plus_build": [
+          30.723072052001953,
+          30.717542266845705,
+          30.723686599731444
+        ],
+        "build": [
+          0.6922240257263184,
+          0.6799359917640686,
+          0.7024639844894409
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.807,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 3.3974647521972656e-05,
+        "scan": 3.3974647521972656e-05,
+        "lib": 3.3974647521972656e-05,
+        "sdpa": 3.402680158615112e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 7,
+      "density": 0.5,
+      "ideal_speedup_vs_own_dense": 2.0,
+      "max_count": 64,
+      "mean_count": 64.0,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          24.68505573272705,
+          24.68188133239746,
+          24.69232635498047
+        ],
+        "lib_incl_build": [
+          24.500736236572266,
+          24.48855056762695,
+          24.5317626953125
+        ],
+        "list": [
+          15.226880073547363,
+          15.222784042358398,
+          15.239168167114258
+        ],
+        "list_plus_build": [
+          15.922688007354736,
+          15.919103622436523,
+          15.927295684814453
+        ],
+        "build": [
+          0.7167999744415283,
+          0.6985728144645691,
+          0.7319551825523377
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.595,
+      "speedup_list_vs_own_dense": 1.978,
+      "efficiency_vs_ideal": 0.989,
+      "max_abs_err": {
+        "list": 4.139542579650879e-05,
+        "scan": 4.139542579650879e-05,
+        "lib": 4.139542579650879e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 3,
+      "real_depth": 7,
+      "density": 0.125,
+      "ideal_speedup_vs_own_dense": 8.0,
+      "max_count": 16,
+      "mean_count": 16.0,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          10.018815994262695,
+          10.014105796813965,
+          10.031308555603026
+        ],
+        "lib_incl_build": [
+          6.730751991271973,
+          6.71211519241333,
+          6.739353656768799
+        ],
+        "list": [
+          3.9147520065307617,
+          3.9137279987335205,
+          3.915776014328003
+        ],
+        "list_plus_build": [
+          4.717056035995483,
+          4.690944004058838,
+          4.763238620758057
+        ],
+        "build": [
+          0.6922240257263184,
+          0.6778879761695862,
+          0.7014399766921997
+        ]
+      },
+      "speedup_list_vs_sdpa": 6.205,
+      "speedup_list_vs_own_dense": 7.692,
+      "efficiency_vs_ideal": 0.962,
+      "max_abs_err": {
+        "list": 0.00010901689529418945,
+        "scan": 0.00010901689529418945,
+        "lib": 0.00010901689529418945
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": false,
+      "depth": 7,
+      "real_depth": 7,
+      "density": 0.00781,
+      "ideal_speedup_vs_own_dense": 128.0,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          7.494656085968018,
+          7.48748779296875,
+          7.4997758865356445
+        ],
+        "lib_incl_build": [
+          0.9768959879875183,
+          0.9728000164031982,
+          0.9871360063552856
+        ],
+        "list": [
+          0.4106239974498749,
+          0.40959998965263367,
+          0.4126720130443573
+        ],
+        "list_plus_build": [
+          1.223680019378662,
+          1.206272006034851,
+          1.2318719625473022
+        ],
+        "build": [
+          0.6932479739189148,
+          0.6748160123825073,
+          0.6993920207023621
+        ]
+      },
+      "speedup_list_vs_sdpa": 59.155,
+      "speedup_list_vs_own_dense": 73.337,
+      "efficiency_vs_ideal": 0.573,
+      "max_abs_err": {
+        "list": 0.0004113912582397461,
+        "scan": 0.0004113912582397461,
+        "lib": 0.0004113912582397461
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": false,
+      "depth": 0,
+      "real_depth": 7,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 128,
+      "mean_count": 128.0,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          44.87014389038086,
+          44.86737899780274,
+          44.87290878295898
+        ],
+        "lib_incl_build": [
+          48.28825569152832,
+          48.27934646606446,
+          48.29716491699219
+        ],
+        "list": [
+          30.114816665649414,
+          30.114816665649414,
+          30.2014461517334
+        ],
+        "list_plus_build": [
+          31.046655654907227,
+          31.00180511474609,
+          31.09212188720703
+        ],
+        "build": [
+          0.7024639844894409,
+          0.6860799789428711,
+          0.7600128054618835
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.807,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 3.3974647521972656e-05,
+        "scan": 3.3974647521972656e-05,
+        "lib": 3.3974647521972656e-05,
+        "sdpa": 3.402680158615112e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": false,
+      "depth": 1,
+      "real_depth": 7,
+      "density": 0.50392,
+      "ideal_speedup_vs_own_dense": 1.98,
+      "max_count": 81,
+      "mean_count": 64.5,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          24.762367248535156,
+          24.745779037475586,
+          24.764825439453126
+        ],
+        "lib_incl_build": [
+          30.73638343811035,
+          30.73024024963379,
+          30.808882904052734
+        ],
+        "list": [
+          15.368191719055176,
+          15.359999656677246,
+          15.371264457702637
+        ],
+        "list_plus_build": [
+          16.15615940093994,
+          16.123903274536133,
+          16.169984817504883
+        ],
+        "build": [
+          0.6850559711456299,
+          0.6692863941192627,
+          0.6963199973106384
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.581,
+      "speedup_list_vs_own_dense": 1.96,
+      "efficiency_vs_ideal": 0.987,
+      "max_abs_err": {
+        "list": 4.129856824874878e-05,
+        "scan": 4.129856824874878e-05,
+        "lib": 4.129856824874878e-05
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": false,
+      "depth": 3,
+      "real_depth": 7,
+      "density": 0.13196,
+      "ideal_speedup_vs_own_dense": 7.58,
+      "max_count": 28,
+      "mean_count": 16.89,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          10.046463966369629,
+          10.042367935180664,
+          10.05301742553711
+        ],
+        "lib_incl_build": [
+          11.130879878997803,
+          11.117772483825684,
+          11.143987274169922
+        ],
+        "list": [
+          4.149248123168945,
+          4.141465568542481,
+          4.154982471466065
+        ],
+        "list_plus_build": [
+          5.064703941345215,
+          4.97377290725708,
+          5.236121559143067
+        ],
+        "build": [
+          0.6963199973106384,
+          0.6778879761695862,
+          0.711679995059967
+        ]
+      },
+      "speedup_list_vs_sdpa": 5.854,
+      "speedup_list_vs_own_dense": 7.258,
+      "efficiency_vs_ideal": 0.958,
+      "max_abs_err": {
+        "list": 0.00012579560279846191,
+        "scan": 0.00012579560279846191,
+        "lib": 0.00012579560279846191
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": false,
+      "depth": 7,
+      "real_depth": 7,
+      "density": 0.01545,
+      "ideal_speedup_vs_own_dense": 64.74,
+      "max_count": 6,
+      "mean_count": 1.98,
+      "ms": {
+        "sdpa": [
+          24.29030418395996,
+          24.289484786987302,
+          24.29071388244629
+        ],
+        "scan": [
+          7.586303949356079,
+          7.583744049072266,
+          7.595212936401367
+        ],
+        "lib_incl_build": [
+          2.993151903152466,
+          2.9859840869903564,
+          3.0054399967193604
+        ],
+        "list": [
+          0.6451200246810913,
+          0.6430720090866089,
+          0.647167980670929
+        ],
+        "list_plus_build": [
+          1.4714879989624023,
+          1.4540799856185913,
+          1.656831979751587
+        ],
+        "build": [
+          0.7004160284996033,
+          0.6850559711456299,
+          0.707584023475647
+        ]
+      },
+      "speedup_list_vs_sdpa": 37.652,
+      "speedup_list_vs_own_dense": 46.681,
+      "efficiency_vs_ideal": 0.721,
+      "max_abs_err": {
+        "list": 0.00030344724655151367,
+        "scan": 0.00030344724655151367,
+        "lib": 0.00030344724655151367
+      },
+      "errors": {},
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 7,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 128,
+      "mean_count": 64.5,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          16.504319190979004,
+          16.467967987060547,
+          16.529407501220703
+        ],
+        "list_plus_build": [
+          17.296384811401367,
+          17.227365875244143,
+          17.409229278564453
+        ],
+        "build": [
+          0.7423999905586243,
+          0.7301120162010193,
+          0.749567985534668
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.769,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0008580684661865234,
+        "sdpa": 0.0008580684661865234
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 7,
+      "density": 0.50388,
+      "ideal_speedup_vs_own_dense": 1.98,
+      "max_count": 64,
+      "mean_count": 32.5,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          8.341504096984863,
+          8.318976402282715,
+          8.37939167022705
+        ],
+        "list_plus_build": [
+          9.090559959411621,
+          9.06240005493164,
+          9.102540588378906
+        ],
+        "build": [
+          0.7383040189743042,
+          0.7229440212249756,
+          0.7757824063301086
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.522,
+      "speedup_list_vs_own_dense": 1.979,
+      "efficiency_vs_ideal": 0.997,
+      "max_abs_err": {
+        "list": 0.0008633136749267578
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 3,
+      "real_depth": 7,
+      "density": 0.13178,
+      "ideal_speedup_vs_own_dense": 7.59,
+      "max_count": 16,
+      "mean_count": 8.5,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          2.2968320846557617,
+          2.293760061264038,
+          2.303999900817871
+        ],
+        "list_plus_build": [
+          3.123711943626404,
+          3.117875099182129,
+          3.1428608894348145
+        ],
+        "build": [
+          0.7403519749641418,
+          0.7290880084037781,
+          0.7464960217475891
+        ]
+      },
+      "speedup_list_vs_sdpa": 5.527,
+      "speedup_list_vs_own_dense": 7.186,
+      "efficiency_vs_ideal": 0.947,
+      "max_abs_err": {
+        "list": 0.0009648799896240234
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "tree",
+      "causal": true,
+      "depth": 7,
+      "real_depth": 7,
+      "density": 0.0155,
+      "ideal_speedup_vs_own_dense": 64.5,
+      "max_count": 1,
+      "mean_count": 1.0,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.4208639860153198,
+          0.4188160002231598,
+          0.42291200160980225
+        ],
+        "list_plus_build": [
+          1.2892160415649414,
+          1.2810239791870117,
+          1.3340672254562378
+        ],
+        "build": [
+          0.7454720139503479,
+          0.7333887815475464,
+          0.7553023815155029
+        ]
+      },
+      "speedup_list_vs_sdpa": 30.164,
+      "speedup_list_vs_own_dense": 39.215,
+      "efficiency_vs_ideal": 0.608,
+      "max_abs_err": {
+        "list": 0.0013842582702636719
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": true,
+      "depth": 0,
+      "real_depth": 7,
+      "density": 1.0,
+      "ideal_speedup_vs_own_dense": 1.0,
+      "max_count": 128,
+      "mean_count": 64.5,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          16.38553524017334,
+          16.36147117614746,
+          16.42905616760254
+        ],
+        "list_plus_build": [
+          17.2544002532959,
+          17.171456146240235,
+          17.28184280395508
+        ],
+        "build": [
+          0.7357439994812012,
+          0.724172818660736,
+          0.7600128054618837
+        ]
+      },
+      "speedup_list_vs_sdpa": 0.775,
+      "speedup_list_vs_own_dense": 1.0,
+      "efficiency_vs_ideal": 1.0,
+      "max_abs_err": {
+        "list": 0.0008580684661865234,
+        "sdpa": 0.0008580684661865234
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": true,
+      "depth": 1,
+      "real_depth": 7,
+      "density": 0.50777,
+      "ideal_speedup_vs_own_dense": 1.97,
+      "max_count": 81,
+      "mean_count": 32.75,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          8.425472259521484,
+          8.41113567352295,
+          8.476672172546387
+        ],
+        "list_plus_build": [
+          9.12179183959961,
+          9.109094429016114,
+          9.14944019317627
+        ],
+        "build": [
+          0.7362560033798218,
+          0.7221248149871826,
+          0.7434239983558655
+        ]
+      },
+      "speedup_list_vs_sdpa": 1.507,
+      "speedup_list_vs_own_dense": 1.945,
+      "efficiency_vs_ideal": 0.987,
+      "max_abs_err": {
+        "list": 0.0009248256683349609
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": true,
+      "depth": 3,
+      "real_depth": 7,
+      "density": 0.13869,
+      "ideal_speedup_vs_own_dense": 7.21,
+      "max_count": 28,
+      "mean_count": 8.95,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          2.4145920276641846,
+          2.4045567512512207,
+          2.4197120666503906
+        ],
+        "list_plus_build": [
+          3.2614400386810303,
+          3.239935970306396,
+          3.281715154647827
+        ],
+        "build": [
+          0.7352319955825806,
+          0.7221248149871826,
+          0.7434239983558655
+        ]
+      },
+      "speedup_list_vs_sdpa": 5.258,
+      "speedup_list_vs_own_dense": 6.786,
+      "efficiency_vs_ideal": 0.941,
+      "max_abs_err": {
+        "list": 0.0009799003601074219
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    },
+    {
+      "seq_len": 16384,
+      "num_blocks": 128,
+      "pattern": "random",
+      "causal": true,
+      "depth": 7,
+      "real_depth": 7,
+      "density": 0.02308,
+      "ideal_speedup_vs_own_dense": 43.33,
+      "max_count": 6,
+      "mean_count": 1.49,
+      "ms": {
+        "sdpa": [
+          12.695039749145508,
+          12.666674995422364,
+          12.708044815063477
+        ],
+        "scan": null,
+        "lib_incl_build": null,
+        "list": [
+          0.5457919836044312,
+          0.5437440276145935,
+          0.5478399991989136
+        ],
+        "list_plus_build": [
+          1.442304015159607,
+          1.4286848306655884,
+          1.4612480401992798
+        ],
+        "build": [
+          0.7649279832839966,
+          0.7432191967964172,
+          0.7772160172462463
+        ]
+      },
+      "speedup_list_vs_sdpa": 23.26,
+      "speedup_list_vs_own_dense": 30.022,
+      "efficiency_vs_ideal": 0.693,
+      "max_abs_err": {
+        "list": 0.0013842582702636719
+      },
+      "errors": {
+        "lib": "CompilationError: at 71:12:"
+      },
+      "pass": true
+    }
+  ]
+}
