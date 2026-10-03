@@ -148,7 +148,9 @@ class SurgicalLlamaAttention(nn.Module):
             seq_len=max_pos_embeddings,
             num_heads=self.num_heads,
             p=self.p,
-            init_mode=init_mode
+            init_mode=init_mode,
+            levels=getattr(config, "surgical_tree_depth", None),
+            tree_mode=getattr(config, "surgical_tree_mode", False)
         )
 
     # ------------------------------------------------------------------

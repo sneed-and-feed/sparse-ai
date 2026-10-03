@@ -42,6 +42,8 @@ class DynamicTopologyRouter(nn.Module):
         p: int = 2,
         tau: float = 1.0,
         hard: bool = True,
+        levels: Optional[int] = None,
+        tree_mode: bool = False,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -49,53 +51,96 @@ class DynamicTopologyRouter(nn.Module):
         self.p = p
         self.tau = tau
         self.hard = hard
-        self.levels = int(math.ceil(math.log(max(seq_len, 2), p)))
+        self.levels = levels if levels is not None else int(math.ceil(math.log(max(seq_len, 2), p)))
+        self.tree_mode = tree_mode
 
         # Per-head routing: shared backbone, per-head projection heads
         self.backbone = nn.Linear(embed_dim, embed_dim)
-        self.route_heads = nn.Linear(embed_dim, num_heads * self.levels * p)
+        if self.tree_mode:
+            self.num_internal = (self.p ** self.levels - 1) // (self.p - 1)
+            self.route_heads = nn.Linear(embed_dim, num_heads * self.num_internal * self.p)
+        else:
+            self.route_heads = nn.Linear(embed_dim, num_heads * self.levels * self.p)
 
-        # Deterministic Collapse Initialization for Continuous Logit Homotopy
         with torch.no_grad():
-            nn.init.zeros_(self.route_heads.weight)
-            # Initialize bias such that Child 0 has logit +5.0, others have -5.0
-            b = torch.full((self.num_heads * self.levels * self.p,), -5.0)
-            for h in range(self.num_heads):
-                for l in range(self.levels):
-                    idx = (h * self.levels * self.p) + (l * self.p) + 0
-                    b[idx] = 5.0
-            self.route_heads.bias.copy_(b)
+            if init_mode == "random":
+                # Pure random projection: tests if pre-trained representation geometry alone partitions tokens
+                nn.init.normal_(self.backbone.weight, std=0.02)
+                nn.init.zeros_(self.backbone.bias)
+                nn.init.normal_(self.route_heads.weight, std=0.02)
+                nn.init.zeros_(self.route_heads.bias)
+            else:
+                # Deterministic Collapse Initialization for Continuous Logit Homotopy
+                nn.init.zeros_(self.route_heads.weight)
+                if self.tree_mode:
+                    b = torch.full((self.num_heads * self.num_internal * self.p,), -5.0)
+                    for h in range(self.num_heads):
+                        for node in range(self.num_internal):
+                            idx = (h * self.num_internal * self.p) + (node * self.p) + 0
+                            b[idx] = 5.0
+                    self.route_heads.bias.copy_(b)
+                else:
+                    b = torch.full((self.num_heads * self.levels * self.p,), -5.0)
+                    for h in range(self.num_heads):
+                        for l in range(self.levels):
+                            idx = (h * self.levels * self.p) + (l * self.p) + 0
+                            b[idx] = 5.0
+                    self.route_heads.bias.copy_(b)
+
 
     def forward(
         self, x: torch.Tensor, tau_override: Optional[float] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            x: (batch, seq_len, embed_dim) token embeddings
-            tau_override: optional temperature override for annealing schedules
-
-        Returns:
-            assignments: (batch, num_heads, seq_len, levels, p) routing weights
-            load_balance_loss: scalar auxiliary loss for training stability
-        """
         batch_size, seq_len, _ = x.shape
         tau = tau_override if tau_override is not None else self.tau
 
-        # Shared feature extraction → per-head routing logits
         h = F.gelu(self.backbone(x))  # (batch, seq_len, embed_dim)
-        logits = self.route_heads(h)  # (batch, seq_len, num_heads * levels * p)
-        logits = logits.view(batch_size, seq_len, self.num_heads, self.levels, self.p)
-        logits = logits.permute(0, 2, 1, 3, 4)  # (batch, heads, seq_len, levels, p)
-
-        if self.training:
-            # Flatten for gumbel_softmax, then reshape back
-            flat = logits.reshape(-1, self.p)
-            sampled = F.gumbel_softmax(flat, tau=tau, hard=self.hard, dim=-1)
-            assignments = sampled.view_as(logits)
+        logits = self.route_heads(h).clamp(min=-50000.0, max=50000.0)
+        
+        if self.tree_mode:
+            logits = logits.view(batch_size, seq_len, self.num_heads, self.num_internal, self.p)
+            log_probs = F.log_softmax(logits.to(torch.float32), dim=-1)
+            
+            path_log_probs = torch.zeros((batch_size, seq_len, self.num_heads, 1), device=logits.device, dtype=torch.float32)
+            current_node_start = 0
+            
+            for l in range(self.levels):
+                num_nodes_level = self.p ** l
+                level_log_probs = log_probs[:, :, :, current_node_start : current_node_start + num_nodes_level, :]
+                new_path_log_probs = path_log_probs.unsqueeze(-1) + level_log_probs
+                path_log_probs = new_path_log_probs.view(batch_size, seq_len, self.num_heads, num_nodes_level * self.p)
+                current_node_start += num_nodes_level
+                
+            if self.training:
+                sampled_leaves = F.gumbel_softmax(path_log_probs, tau=tau, hard=self.hard, dim=-1)
+            else:
+                indices = path_log_probs.argmax(dim=-1)
+                sampled_leaves = F.one_hot(indices, num_classes=self.p**self.levels).float()
+                
+            if getattr(self, "leaf_to_assignments", None) is None:
+                mapping = torch.zeros((self.p**self.levels, self.levels, self.p), device=logits.device, dtype=torch.float32)
+                for leaf_idx in range(self.p**self.levels):
+                    val = leaf_idx
+                    for l in range(self.levels - 1, -1, -1):
+                        choice = val % self.p
+                        mapping[leaf_idx, l, choice] = 1.0
+                        val = val // self.p
+                self.register_buffer("leaf_to_assignments", mapping, persistent=False)
+                
+            assignments = torch.matmul(sampled_leaves, self.leaf_to_assignments.view(self.p**self.levels, -1))
+            assignments = assignments.view(batch_size, seq_len, self.num_heads, self.levels, self.p).to(logits.dtype)
+            assignments = assignments.permute(0, 2, 1, 3, 4)
         else:
-            # Deterministic argmax at inference
-            indices = logits.argmax(dim=-1)
-            assignments = F.one_hot(indices, num_classes=self.p).float()
+            logits = logits.view(batch_size, seq_len, self.num_heads, self.levels, self.p)
+            logits = logits.permute(0, 2, 1, 3, 4)  # (batch, heads, seq_len, levels, p)
+
+            if self.training:
+                flat = logits.reshape(-1, self.p)
+                sampled = F.gumbel_softmax(flat.to(torch.float32), tau=tau, hard=self.hard, dim=-1).to(logits.dtype)
+                assignments = sampled.view_as(logits)
+            else:
+                indices = logits.argmax(dim=-1)
+                assignments = F.one_hot(indices, num_classes=self.p).float()
 
         load_balance_loss = self.compute_load_balance_loss(assignments)
         return assignments, load_balance_loss
@@ -105,24 +150,23 @@ class DynamicTopologyRouter(nn.Module):
         """
         Switch Transformer-style load balancing loss.
 
-        Penalizes routing imbalance to prevent all tokens collapsing to one
-        branch. Loss is minimized when tokens are uniformly distributed
-        across branches at every level.
-
-        L_balance = p * sum_i(f_i * P_i) per level, averaged over heads/batch.
-
-        Args:
-            assignments: (batch, num_heads, seq_len, levels, p) routing weights
-        Returns:
-            loss: scalar tensor
+        Computes the joint probability of the full root-to-leaf path to prevent
+        the model from collapsing into highly correlated parallel choices.
         """
-        p = assignments.shape[-1]
-        # f_i: fraction of tokens routed to each branch (hard counts)
-        f = (assignments.detach() > 0.5).float().mean(dim=2)  # (B, H, L, p)
-        # P_i: mean routing probability to each branch (soft, differentiable)
-        P = assignments.mean(dim=2)  # (B, H, L, p)
-        # Dot product per level, scale by p so uniform distribution → loss = 1
-        loss = (f * P).sum(dim=-1).mean() * p
+        B, H, S, L, p = assignments.shape
+        if L <= 8:
+            joint_P = assignments[..., 0, :]
+            for l in range(1, L):
+                joint_P = joint_P.unsqueeze(-1) * assignments[..., l, :].unsqueeze(-2)
+                joint_P = joint_P.view(B, H, S, -1)
+            num_paths = p ** L
+            f = (joint_P.detach() > 0.5).float().mean(dim=2)
+            P = joint_P.mean(dim=2)
+            loss = (f * P).sum(dim=-1).mean() * num_paths
+        else:
+            f = (assignments.detach() > 0.5).float().mean(dim=2)
+            P = assignments.mean(dim=2)
+            loss = (f * P).sum(dim=-1).mean() * p
         return loss
 
     @staticmethod
@@ -197,9 +241,10 @@ def _compute_distance_mask(
     # M[b, i, j, l] = prob tokens i, j agree at level l
     M = torch.einsum("bilp,bjlp->bijl", assignments, assignments)
 
-    # Reversed cumulative product for expected distance
-    M_flipped = M.flip(dims=[-1])
-    P_flipped = M_flipped.cumprod(dim=-1)
+    # CRITICAL FIX: The previous version flipped M and computed suffix distance instead of prefix distance.
+    # We must compute cummin directly on M (starting from the root at l=0) to ensure a true tree topology.
+    # cummin is perfectly stable compared to cumprod.
+    P_flipped = M.cummin(dim=-1)[0]
     sum_P = P_flipped.sum(dim=-1)
     expected_dist = levels - sum_P
 

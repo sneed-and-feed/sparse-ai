@@ -17,6 +17,7 @@ def patch_llama_model(
     replacing self_attn layers with SurgicalLlamaAttention and transferring pre-trained weights.
     """
     setattr(model.config, "surgical_p", arity)
+    setattr(model.config, "surgical_tree_mode", kwargs.get("tree_mode", False))
     setattr(model.config, "surgical_tree_depth", tree_depth)
     setattr(model.config, "surgical_tau_init", tau_init)
     setattr(model.config, "preserve_sinks", preserve_sinks)

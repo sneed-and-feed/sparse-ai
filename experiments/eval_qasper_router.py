@@ -211,6 +211,7 @@ def main():
     ap.add_argument("--train_steps", type=int, default=80, help="WikiText warmup steps (3F used 80)")
     ap.add_argument("--skip_warmup", action="store_true", help="Untrained router (3E-style control)")
     ap.add_argument("--init_mode", default="collapse", choices=["collapse", "random"])
+    ap.add_argument("--tree_mode", action="store_true", help="Use Option B: true tree router")
     ap.add_argument("--no_window_baseline", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output_dir", default="experiments/results")
@@ -239,7 +240,7 @@ def main():
                                                  device_map="cuda", token=hf_token)
 
     print("[2/4] Injecting router (tree_depth=5, arity=2, sinks)")
-    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True, init_mode=args.init_mode)
+    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True, init_mode=args.init_mode, tree_mode=args.tree_mode)
     if not args.skip_warmup:
         print(f"[3/4] WikiText warmup ({args.train_steps} steps; same recipe as 3F)")
         warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda")

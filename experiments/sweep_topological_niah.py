@@ -621,7 +621,7 @@ def main():
     
     # 3. Inject Dynamic Topology Router
     print(f"\n[2/4] Injecting Dynamic Topology Router (LLaMA Surgery, init_mode='{args.init_mode}')...")
-    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True, init_mode=args.init_mode)
+    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True, init_mode=args.init_mode, tree_mode=args.tree_mode)
     
     # 4. Router Warmup
     if not args.skip_warmup:
