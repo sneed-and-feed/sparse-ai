@@ -110,9 +110,38 @@ sparse-ai/
 ### 1. Triton Kernel Forward Execution Time (A100 GPU)
 
 > [!NOTE]
+> Measured on an **NVIDIA A100-SXM4-80GB** (torch 2.11, Triton 3.6.0, fp16 forward, batch 8, 8 heads, head_dim 64, 128-token route blocks, `triton.testing.do_bench` median with L2 flush). Raw data: [`benchmark_block_list_a100_sxm4_80gb_2026-10-03.json`](benchmarks/results/benchmark_block_list_a100_sxm4_80gb_2026-10-03.json); reproduce with [`benchmarks/benchmark_block_list.py`](benchmarks/benchmark_block_list.py). **All 76 configurations** (tree + random routing, causal on/off, 1K–16K) matched an fp32 block-masked reference (max abs error ≤ 1.4e-3). Times are kernel-only with block lists prebuilt (in a model, lists are built once per forward and shared by layers with the same routing).
+
+**Block-list kernel** ([`ultrametric/block_list.py`](src/ultrametric/block_list.py)): each query block loops over *only its own* active key blocks, so cost tracks the number of active blocks. Headline baseline: **PyTorch SDPA (FlashAttention-2)**.
+
+| $N$ | Routing | Causal | Active density | SDPA (ms) | Block-list (ms) | **vs SDPA** | vs own dense | ideal (1/density) |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 2,048 | random | yes | 56.1% | 0.257 | 0.193 | 1.33× | 1.64× | 1.8× |
+| 4,096 | random | no | 27.6% | 1.540 | 0.577 | **2.67×** | 3.31× | 3.6× |
+| 4,096 | random | yes | 29.7% | 1.046 | 0.368 | **2.84×** | 3.04× | 3.4× |
+| 8,192 | random | no | 13.8% | 6.145 | 1.121 | **5.48×** | 6.71× | 7.2× |
+| 8,192 | random | yes | 4.6% | 3.242 | 0.284 | **11.43×** | 14.93× | 21.9× |
+| 8,192 | tree | no | 1.6% | 6.145 | 0.217 | **28.31×** | 34.65× | 64.0× |
+| 16,384 | random | yes | 13.9% | 12.695 | 2.415 | **5.26×** | 6.79× | 7.2× |
+| 16,384 | random | yes | 2.3% | 12.695 | 0.546 | **23.26×** | 30.02× | 43.3× |
+| 16,384 | tree | no | 0.8% | 24.290 | 0.411 | **59.16×** | 73.34× | 128.0× |
+| any | — | — | 100% (dense) | — | — | 0.77–0.94× | 1.00× | 1.0× |
+
+**Reading the table honestly:**
+- **Cost tracks active blocks:** at ≤ 87% sparsity the speedup over the kernel's own dense path is 90–100% of the ideal $1/\text{density}$, for random routing and causal masks too; at extreme sparsity per-block overhead caps it at 55–72%.
+- **Dense, the kernel is 0.77–0.94× FlashAttention**, so it breaks even with SDPA at roughly 80–85% density and wins below that. At the ~55–60% density the QASPER router actually produces (§3b) it is ~1.3–1.5× faster than SDPA.
+- **"tree" routing is the best case** (block-diagonal at full depth, balanced rows); "random" routing (uneven rows, scattered keys) is 10–30% slower at equal density and is closer to what a learned router produces.
+- **List construction is not free:** the original builder cost a constant ~0.7 ms per call (host syncs), more than the kernel itself at ≤ 8K and high sparsity. A sync-free builder (`build_block_lists(..., arity=p)`) has been added but **not yet re-measured on GPU**.
+- **Previous kernels, same run:** the scan kernel used for earlier README numbers (visits every key block, non-causal only) reached 3.1× vs SDPA at 8K / 98.4%; the library kernel (`block_sparse_attention`) failed to compile with `is_causal=True` (fixed in this commit, CPU-interpreter verified, GPU re-run pending) and was slower than the scan kernel non-causal because it pads every row to the longest list.
+- Backward pass is not implemented for the block-list kernel (forward/inference only).
+
+<details>
+<summary><b>Previous kernel (scan): superseded, kept for the record</b></summary>
+
+> [!NOTE]
 > Measured on an **NVIDIA A100-SXM4-40GB** (torch 2.11, Triton 3.6.0, CUDA 13.0, fp16, non-causal forward, batch 8, 8 heads, head_dim 64, 128×128 tiles, median of 30 runs). Raw data: [`benchmark_triton_v3_sdpa_a100_2026-10-03.json`](benchmarks/results/benchmark_triton_v3_sdpa_a100_2026-10-03.json); reproduce with [`benchmarks/benchmark_triton.py`](benchmarks/benchmark_triton.py). Every row's output was checked against a block-masked dense reference (max abs error ≤ 1e-3). Routing in this benchmark is **synthetic** (each block's natural binary path), so full depth corresponds to block-diagonal attention; learned routes may be less balanced.
 
-**Headline baseline: PyTorch SDPA (FlashAttention-2 backend).**
+**Baseline: PyTorch SDPA (FlashAttention-2 backend).**
 
 | $N$ | Depth | Block Sparsity | SDPA / Flash (ms) | Triton Dense, same kernel (ms) | Triton Sparse (ms) | **vs SDPA** | vs own dense | vs un-fused PyTorch |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -128,6 +157,8 @@ sparse-ai/
 - Against FlashAttention, the sparse kernel **breaks even at ~50% sparsity for $N \ge 2048$** and reaches **3.11× at 98.4% sparsity (8K)**. Below 1K tokens it is slower than SDPA.
 - The kernel's own dense path is ~1.8× slower than FlashAttention, and the achieved sparse gain (5.72× at 98.4%) is far below the ideal $1/(1-s) = 64\times$, because the inner loop still visits every key block to test its route. Both are engineering headroom (block-index lists, Flash-style pipelining), not fundamental limits.
 - Speedups vs un-fused PyTorch (up to 27×) are included for continuity but mostly reflect fusion, not sparsity. Peak-memory savings vs un-fused (up to 98.4%) likewise come from never materializing the $N \times N$ matrix; SDPA achieves the same.
+
+</details>
 
 ### 2. Distributed Communication Savings (Simulated)
 
@@ -170,7 +201,7 @@ Evaluating the surgically injected Dynamic Topology Router across $N=4,096$ toke
 **Reading it honestly:**
 - **Routing beats locality:** at every depth the learned router significantly outperforms a window with the same key budget, so *which* distant keys it keeps matters.
 - **No measurable loss at $r \le 3$** vs. dense, but n = 30 gives CIs of ~±13 F1; "no loss" means "none detected". $r = 4$ shows a clear drop.
-- **The router is not yet very sparse in practice:** ~1.4–1.7× fewer keys, not the nominal 4–16×. At this density the Triton kernel is not faster than FlashAttention (§1). Closing the gap between nominal and measured budget is the open problem. 0/30 degenerate outputs in every condition.
+- **The router is not yet very sparse in practice:** ~1.4–1.7× fewer keys, not the nominal 4–16×. At this density the block-list kernel is only ~1.3–1.5× faster than FlashAttention (§1). Closing the gap between nominal and measured budget is the open problem. 0/30 degenerate outputs in every condition.
 
 ### 4. Production Checkpoints & GGUF Releases (Hugging Face)
 
