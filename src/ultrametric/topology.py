@@ -42,6 +42,7 @@ class DynamicTopologyRouter(nn.Module):
         p: int = 2,
         tau: float = 1.0,
         hard: bool = True,
+        init_mode: str = "collapse",
         levels: Optional[int] = None,
         tree_mode: bool = False,
     ):
@@ -130,6 +131,11 @@ class DynamicTopologyRouter(nn.Module):
             assignments = torch.matmul(sampled_leaves, self.leaf_to_assignments.view(self.p**self.levels, -1))
             assignments = assignments.view(batch_size, seq_len, self.num_heads, self.levels, self.p).to(logits.dtype)
             assignments = assignments.permute(0, 2, 1, 3, 4)
+            
+            num_paths = self.p ** self.levels
+            f = (sampled_leaves.detach() > 0.5).float().mean(dim=1)
+            P = path_log_probs.exp().mean(dim=1)
+            load_balance_loss = (f * P).sum(dim=-1).mean() * num_paths
         else:
             logits = logits.view(batch_size, seq_len, self.num_heads, self.levels, self.p)
             logits = logits.permute(0, 2, 1, 3, 4)  # (batch, heads, seq_len, levels, p)
@@ -142,7 +148,8 @@ class DynamicTopologyRouter(nn.Module):
                 indices = logits.argmax(dim=-1)
                 assignments = F.one_hot(indices, num_classes=self.p).float()
 
-        load_balance_loss = self.compute_load_balance_loss(assignments)
+            load_balance_loss = self.compute_load_balance_loss(assignments)
+
         return assignments, load_balance_loss
 
     @staticmethod
