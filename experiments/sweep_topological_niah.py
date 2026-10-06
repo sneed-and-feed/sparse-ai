@@ -577,6 +577,7 @@ def main():
     parser.add_argument("--attention_backend", type=str, default="eager", choices=["eager", "block_list"],
                         help="'eager' = token-level routed mask (original); 'block_list' = block-granular "
                              "routing + Triton block-list kernel for prefill (CUDA fp16/bf16)")
+    parser.add_argument("--kolibri_rope", action="store_true", help="Strip RoPE from every 5th layer (kolibri pattern)")
     args = parser.parse_args()
     depth_values = [int(d) for d in args.depths.split(",") if d.strip()]
     
@@ -637,6 +638,8 @@ def main():
     # 5. Run Sweep
     model.eval()
     setattr(model.config, "surgical_attention_backend", args.attention_backend)
+    if args.kolibri_rope:
+        setattr(model.config, "surgical_kolibri_rope", True)
     print(f"\n[4/4] Executing parameter sweep across depths r in {depth_values} (backend={args.attention_backend})...")
     results = run_topological_niah_sweep(
         model,

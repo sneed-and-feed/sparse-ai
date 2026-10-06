@@ -281,7 +281,10 @@ class SurgicalLlamaAttention(nn.Module):
             v = FakeQuantizeSTE.apply(v, kv_bits, v_scale, q_min, q_max)
 
         # Apply RoPE
-        if position_embeddings is not None:
+        skip_rope = getattr(self.config, "surgical_kolibri_rope", False) and getattr(self, "layer_idx", -1) % 5 == 0
+        if skip_rope:
+            pass
+        elif position_embeddings is not None:
             cos, sin = position_embeddings
             # HF position_embeddings can be 3D or 4D depending on version
             if cos.dim() == 3:
@@ -396,6 +399,33 @@ class SurgicalLlamaAttention(nn.Module):
                 idx_k = torch.arange(L, device=hidden_states.device)
                 band = (idx_k.unsqueeze(0) > idx_q.unsqueeze(1) - W)  # (seq_len, L)
                 um_mask_bool = band.unsqueeze(0).unsqueeze(0).expand_as(um_mask_bool).clone()
+                um_mask_bool[..., :, 0] = True
+            elif getattr(self.config, "surgical_mask_override", None) == "oracle":
+                W = int(getattr(self.config, "surgical_window_size", 256))
+                # Distribute budget: e.g. 128 for recent window, rest for top-k
+                recent_w = min(128, W)
+                top_k = max(0, W - recent_w)
+                
+                idx_q = torch.arange(L - seq_len, L, device=hidden_states.device)
+                idx_k = torch.arange(L, device=hidden_states.device)
+                band = (idx_k.unsqueeze(0) > idx_q.unsqueeze(1) - recent_w).unsqueeze(0).unsqueeze(0)
+                
+                um_mask_bool = band.expand_as(um_mask_bool).clone()
+                
+                if top_k > 0:
+                    oracle_scores = scores.clone()
+                    oracle_scores.masked_fill_(band.expand_as(oracle_scores), float('-inf'))
+                    # ensure we don't pick causal masked out tokens
+                    if L > seq_len:
+                        causal = (idx_k.unsqueeze(0) <= idx_q.unsqueeze(1)).unsqueeze(0).unsqueeze(0)
+                        oracle_scores.masked_fill_(~causal.expand_as(oracle_scores), float('-inf'))
+                    
+                    # topk across L
+                    # if L is smaller than top_k, clamp it
+                    actual_top_k = min(top_k, L)
+                    _, topk_indices = oracle_scores.topk(actual_top_k, dim=-1)
+                    um_mask_bool.scatter_(-1, topk_indices, True)
+                
                 um_mask_bool[..., :, 0] = True
 
             # [Eval hook, opt-in] Record the mean number of causal keys each query

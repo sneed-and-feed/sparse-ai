@@ -217,7 +217,8 @@ def main():
     ap.add_argument("--output_dir", default="experiments/results")
     ap.add_argument("--attention_backend", default="eager", choices=["eager", "block_list"],
                     help="'block_list' = block-granular routing + Triton kernel for prefill (routed@r and dense); "
-                         "window@r baselines always use the eager path")
+    ap.add_argument("--oracle_mode", action="store_true", help="Evaluate HySparse2-style oracle at matched budget")
+    ap.add_argument("--kolibri_rope", action="store_true", help="Strip RoPE from every 5th layer (kolibri pattern)")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -246,6 +247,8 @@ def main():
         warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda")
     model.eval()
     model.config.surgical_attention_backend = args.attention_backend
+    if args.kolibri_rope:
+        model.config.surgical_kolibri_rope = True
 
     data = load_qasper()[: args.max_samples]
     print(f"[4/4] Evaluating {len(data)} QASPER samples | depths {depths} | "
@@ -254,6 +257,8 @@ def main():
     conds = ["dense"] + [f"routed@{r}" for r in depths]
     if not args.no_window_baseline:
         conds += [f"window@{r}" for r in depths]
+    if args.oracle_mode:
+        conds += [f"oracle@{r}" for r in depths]
     per = {c: [] for c in conds}           # F1 per sample
     degen = {c: 0 for c in conds}
     frac = {f"routed@{r}": [] for r in depths}  # measured allowed / causal
@@ -292,6 +297,11 @@ def main():
                     W = max(1, int(round(allowed)))
                     pred, f1 = run(f"window@{r}", req_depth=r, override="window", window=W)
                     rows.append({"cond": f"window@{r}", "pred": pred, "f1": f1, "window": W})
+
+                if args.oracle_mode and allowed:
+                    W = max(1, int(round(allowed)))
+                    pred, f1 = run(f"oracle@{r}", req_depth=r, override="oracle", window=W)
+                    rows.append({"cond": f"oracle@{r}", "pred": pred, "f1": f1, "window": W})
 
             for row in rows:
                 fout.write(json.dumps({"idx": i, "_id": s.get("_id"), "length": s.get("length"),
