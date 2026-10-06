@@ -217,6 +217,7 @@ def main():
     ap.add_argument("--output_dir", default="experiments/results")
     ap.add_argument("--attention_backend", default="eager", choices=["eager", "block_list"],
                     help="'block_list' = block-granular routing + Triton kernel for prefill (routed@r and dense); "
+                         "window@r baselines always use the eager path")
     ap.add_argument("--oracle_mode", action="store_true", help="Evaluate HySparse2-style oracle at matched budget")
     ap.add_argument("--kolibri_rope", action="store_true", help="Strip RoPE from every 5th layer (kolibri pattern)")
     args = ap.parse_args()
