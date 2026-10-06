@@ -459,6 +459,41 @@ class SurgicalLlamaAttention(nn.Module):
         full_mask = get_dynamic_ultrametric_mask(
             assignments, p=self.p, max_dist=max_dist, local_window=local_window
         ).to(hidden_states.device)
+        
+        # Oracle Distillation Loss
+        if self.training:
+            with torch.no_grad():
+                # Generate oracle target with 25% budget
+                W = max(1, L // 4)
+                recent_w = min(128, W)
+                top_k = max(0, W - recent_w)
+                
+                idx_q = torch.arange(L - seq_len, L, device=hidden_states.device)
+                idx_k = torch.arange(L, device=hidden_states.device)
+                band = (idx_k.unsqueeze(0) > idx_q.unsqueeze(1) - recent_w).unsqueeze(0).unsqueeze(0)
+                oracle_mask = band.expand(batch_size, self.num_heads, seq_len, L).clone()
+                
+                causal = (idx_k.unsqueeze(0) <= idx_q.unsqueeze(1)).unsqueeze(0).unsqueeze(0)
+                if top_k > 0:
+                    oracle_scores = scores.clone()
+                    oracle_scores.masked_fill_(band, float('-inf'))
+                    oracle_scores.masked_fill_(~causal, float('-inf'))
+                    
+                    actual_top_k = min(top_k, L)
+                    _, topk_indices = oracle_scores.topk(actual_top_k, dim=-1)
+                    oracle_mask.scatter_(-1, topk_indices, True)
+                
+                oracle_mask[..., :, 0] = True # Sink
+                oracle_mask_float = oracle_mask.float()
+            
+            causal_bool = causal.expand(batch_size, self.num_heads, seq_len, L)
+            self.current_distill_loss = F.binary_cross_entropy(
+                full_mask[causal_bool].clamp(0.0, 1.0), 
+                oracle_mask_float[causal_bool]
+            )
+        else:
+            self.current_distill_loss = None
+
         um_mask_bool = full_mask > 0.5  # Shape: (B, H, S_full, L) or (B, H, L, L)
         
         if seq_len == 1 and L > 1:
@@ -473,7 +508,7 @@ class SurgicalLlamaAttention(nn.Module):
         sparse_scores.masked_fill_(is_all_neg_inf, 0.0)
         
         attn_weights = F.softmax(sparse_scores, dim=-1, dtype=torch.float32)
-        attn_weights.nan_to_num_(0.0)
+        attn_weights = attn_weights.nan_to_num(0.0)
 
         # Multiply by the differentiable soft mask for training
         attn_weights = attn_weights * full_mask

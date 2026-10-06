@@ -259,15 +259,18 @@ def warmup_router_wikitext(
         loss = outputs.loss
         
         lb_loss = 0.0
+        distill_loss = 0.0
         for layer in model.model.layers:
             if hasattr(layer.self_attn, 'current_penalty') and layer.self_attn.current_penalty is not None:
                 lb_loss += layer.self_attn.current_penalty
+            if hasattr(layer.self_attn, 'current_distill_loss') and layer.self_attn.current_distill_loss is not None:
+                distill_loss += layer.self_attn.current_distill_loss
                 
-        total_loss = loss + 0.02 * lb_loss
+        total_loss = loss + 0.02 * lb_loss + 1.0 * distill_loss
         total_loss.backward()
         optimizer.step()
         
-        pbar.set_postfix({"loss": f"{loss.item():.3f}", "lb_loss": f"{float(lb_loss):.3f}"})
+        pbar.set_postfix({"loss": f"{loss.item():.3f}", "lb_loss": f"{float(lb_loss):.3f}", "distill": f"{float(distill_loss):.3f}"})
         
     if hasattr(model, "gradient_checkpointing_disable"):
         model.gradient_checkpointing_disable()
