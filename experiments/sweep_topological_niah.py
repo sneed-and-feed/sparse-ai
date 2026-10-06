@@ -577,6 +577,7 @@ def main():
     parser.add_argument("--attention_backend", type=str, default="eager", choices=["eager", "block_list"],
                         help="'eager' = token-level routed mask (original); 'block_list' = block-granular "
                              "routing + Triton block-list kernel for prefill (CUDA fp16/bf16)")
+    parser.add_argument("--tree_mode", action="store_true", help="Use Option B: true tree router")
     parser.add_argument("--kolibri_rope", action="store_true", help="Strip RoPE from every 5th layer (kolibri pattern)")
     args = parser.parse_args()
     depth_values = [int(d) for d in args.depths.split(",") if d.strip()]
