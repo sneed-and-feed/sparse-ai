@@ -414,11 +414,11 @@ class SurgicalLlamaAttention(nn.Module):
                 
                 if top_k > 0:
                     oracle_scores = scores.clone()
-                    oracle_scores.masked_fill_(band.expand_as(oracle_scores), float('-inf'))
+                    oracle_scores.masked_fill_(band, float('-inf'))
                     # ensure we don't pick causal masked out tokens
                     if L > seq_len:
                         causal = (idx_k.unsqueeze(0) <= idx_q.unsqueeze(1)).unsqueeze(0).unsqueeze(0)
-                        oracle_scores.masked_fill_(~causal.expand_as(oracle_scores), float('-inf'))
+                        oracle_scores.masked_fill_(~causal, float('-inf'))
                     
                     # topk across L
                     # if L is smaller than top_k, clamp it

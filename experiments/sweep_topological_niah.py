@@ -638,6 +638,7 @@ def main():
         
     # 5. Run Sweep
     model.eval()
+    model.config.use_cache = True
     setattr(model.config, "surgical_attention_backend", args.attention_backend)
     if args.kolibri_rope:
         setattr(model.config, "surgical_kolibri_rope", True)

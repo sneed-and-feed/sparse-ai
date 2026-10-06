@@ -247,6 +247,7 @@ def main():
         print(f"[3/4] WikiText warmup ({args.train_steps} steps; same recipe as 3F)")
         warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda")
     model.eval()
+    model.config.use_cache = True  # HF disables this during gradient checkpointing but doesn't restore it!
     model.config.surgical_attention_backend = args.attention_backend
     if args.kolibri_rope:
         model.config.surgical_kolibri_rope = True
