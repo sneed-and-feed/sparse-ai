@@ -478,11 +478,11 @@ if HAS_TRITON:
         return ok or [triton.Config({"BLOCK_M": rb, "BLOCK_N": rb}, num_warps=4, num_stages=2)]
 
     _AUTOTUNE_CONFIGS = [
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64}, num_warps=4, num_stages=3),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64}, num_warps=8, num_stages=3),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}, num_warps=8, num_stages=2),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=4, num_stages=3),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 32}, num_warps=4, num_stages=4),
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64}, num_warps=4, num_stages=2),
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64}, num_warps=8, num_stages=2),
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=4, num_stages=2),
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=4, num_stages=1),
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 32}, num_warps=4, num_stages=2),
     ]
 
     _block_list_fwd_tuned = triton.autotune(
@@ -785,55 +785,79 @@ def _block_list_attention_bwd(
         sb_strides = (0, 0, 0, 0)
         dsb_strides = (0, 0, 0, 0)
 
-    bm = block_m or min(64, route_block)
-    bn = block_n or min(64, route_block)
+    bm = block_m or (min(32, route_block) if D >= 128 else min(64, route_block))
+    bn = block_n or (min(32, route_block) if D >= 128 else min(64, route_block))
     if route_block % bm or route_block % bn:
         raise ValueError(f"block_m ({bm}) and block_n ({bn}) must divide route_block ({route_block})")
 
-    if max_count > 0:
-        launch_dq = dict(
-            HEAD_DIM=D,
-            ROUTE_BLOCK=route_block,
-            IS_CAUSAL=bool(is_causal),
-            HAS_SOFT_BIAS=has_soft_bias,
-            BLOCK_M=bm,
-            BLOCK_N=bn,
-        )
-        if not _INTERPRET:
-            launch_dq.update(num_warps=num_warps, num_stages=num_stages)
+    bwd_stages = 1 if (D >= 128 and num_stages > 1) else num_stages
 
-        _block_list_bwd_dq_kernel[(triton.cdiv(N, bm), Z * H)](
-            q, k, v, do, dq, lse, delta, lists, counts,
-            sb_tensor, d_soft_bias if has_soft_bias else q, scale,
-            *q.stride(), *k.stride(), *v.stride(), *do.stride(), *dq.stride(),
-            *sb_strides, *dsb_strides,
-            H, N, nb, max_count,
-            **launch_dq,
-        )
+    if max_count > 0:
+        def _launch_dq_with_params(cur_bm: int, cur_bn: int, cur_stages: int):
+            launch_dq = dict(
+                HEAD_DIM=D,
+                ROUTE_BLOCK=route_block,
+                IS_CAUSAL=bool(is_causal),
+                HAS_SOFT_BIAS=has_soft_bias,
+                BLOCK_M=cur_bm,
+                BLOCK_N=cur_bn,
+            )
+            if not _INTERPRET:
+                launch_dq.update(num_warps=num_warps, num_stages=cur_stages)
+            _block_list_bwd_dq_kernel[(triton.cdiv(N, cur_bm), Z * H)](
+                q, k, v, do, dq, lse, delta, lists, counts,
+                sb_tensor, d_soft_bias if has_soft_bias else q, scale,
+                *q.stride(), *k.stride(), *v.stride(), *do.stride(), *dq.stride(),
+                *sb_strides, *dsb_strides,
+                H, N, nb, max_count,
+                **launch_dq,
+            )
+
+        try:
+            _launch_dq_with_params(bm, bn, bwd_stages)
+        except Exception as e:
+            if "OutOfResources" in type(e).__name__ or "shared memory" in str(e):
+                if has_soft_bias and d_soft_bias is not None:
+                    d_soft_bias.zero_()
+                fb_m = min(32, bm)
+                fb_n = min(32, bn)
+                _launch_dq_with_params(fb_m, fb_n, 1)
+            else:
+                raise
 
         k_lists, q_counts, max_q_count = build_transposed_block_lists(
             BlockLists(lists, counts, max_count), num_key_blocks=nb
         )
         if max_q_count > 0:
-            launch_dkdv = dict(
-                HEAD_DIM=D,
-                ROUTE_BLOCK=route_block,
-                IS_CAUSAL=bool(is_causal),
-                HAS_SOFT_BIAS=has_soft_bias,
-                BLOCK_M=bm,
-                BLOCK_N=bn,
-            )
-            if not _INTERPRET:
-                launch_dkdv.update(num_warps=num_warps, num_stages=num_stages)
+            def _launch_dkdv_with_params(cur_bm: int, cur_bn: int, cur_stages: int):
+                launch_dkdv = dict(
+                    HEAD_DIM=D,
+                    ROUTE_BLOCK=route_block,
+                    IS_CAUSAL=bool(is_causal),
+                    HAS_SOFT_BIAS=has_soft_bias,
+                    BLOCK_M=cur_bm,
+                    BLOCK_N=cur_bn,
+                )
+                if not _INTERPRET:
+                    launch_dkdv.update(num_warps=num_warps, num_stages=cur_stages)
+                _block_list_bwd_dkdv_kernel[(triton.cdiv(N, cur_bn), Z * H)](
+                    q, k, v, do, dk, dv, lse, delta, k_lists, q_counts, sb_tensor, scale,
+                    *q.stride(), *k.stride(), *v.stride(), *do.stride(), *dk.stride(), *dv.stride(),
+                    *sb_strides,
+                    lists, counts, max_count,
+                    H, N, nb, max_q_count,
+                    **launch_dkdv,
+                )
 
-            _block_list_bwd_dkdv_kernel[(triton.cdiv(N, bn), Z * H)](
-                q, k, v, do, dk, dv, lse, delta, k_lists, q_counts, sb_tensor, scale,
-                *q.stride(), *k.stride(), *v.stride(), *do.stride(), *dk.stride(), *dv.stride(),
-                *sb_strides,
-                lists, counts, max_count,
-                H, N, nb, max_q_count,
-                **launch_dkdv,
-            )
+            try:
+                _launch_dkdv_with_params(bm, bn, bwd_stages)
+            except Exception as e:
+                if "OutOfResources" in type(e).__name__ or "shared memory" in str(e):
+                    fb_m = min(32, bm)
+                    fb_n = min(32, bn)
+                    _launch_dkdv_with_params(fb_m, fb_n, 1)
+                else:
+                    raise
 
     if has_soft_bias and d_soft_bias is not None:
         d_soft_bias = d_soft_bias.to(soft_block_bias.dtype)
