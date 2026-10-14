@@ -285,6 +285,10 @@ class SurprisalAdelicCache(DynamicCache):
             return 0
         return int(self.key_cache[layer_idx].shape[-2])
 
+    def get_physical_seq_length(self, layer_idx: Optional[int] = 0) -> int:
+        """Returns physical compressed KV-cache sequence length for `layer_idx`."""
+        return self.get_seq_length(layer_idx)
+
     def get_logical_seq_length(self) -> int:
         """Returns total logical tokens seen before condensation."""
         return int(self._true_seen_tokens)

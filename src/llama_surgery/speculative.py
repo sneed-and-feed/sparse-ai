@@ -180,11 +180,13 @@ class SpeculativeSurgicalGenerator:
                 self.model.train()
 
         if return_stats:
+            total_gen = max(0, int(seq.shape[1] - prompt_len))
             stats = {
                 "total_drafted": self.total_drafted,
                 "total_accepted": self.total_accepted,
                 "total_steps": self.total_steps,
                 "acceptance_rate": self.acceptance_rate,
+                "tokens_per_step": float(total_gen) / float(max(1, self.total_steps)),
             }
             return seq, stats
         return seq
