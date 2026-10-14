@@ -299,8 +299,8 @@ def _tile_lanes_to_dim(x_lanes: jnp.ndarray, target_dim: int) -> jnp.ndarray:
 
 
 def _pallas_tpu_block_list_attn_kernel(
-    lists_ref,      # SMEM: (ZH, nb, max_steps) int32
-    counts_ref,     # SMEM: (ZH, nb) int32
+    lists_ref,      # SMEM: (ZH * nb, max_steps) int32
+    counts_ref,     # SMEM: (ZH * nb,) int32
     q_ref,          # VMEM: (block_size, D)
     k_ref,          # VMEM: (block_size, D) for current active step
     v_ref,          # VMEM: (block_size, D) for current active step
@@ -309,6 +309,7 @@ def _pallas_tpu_block_list_attn_kernel(
     l_scratch_ref,  # VMEM scratch: (block_size, 128) float32
     acc_scratch_ref,# VMEM scratch: (block_size, D) float32
     *,
+    nb: int,
     seq_len: int,
     block_size: int,
     is_causal: bool,
@@ -319,9 +320,10 @@ def _pallas_tpu_block_list_attn_kernel(
     qb = pl.program_id(1)
     step = pl.program_id(2)
 
-    count = counts_ref[zh, qb]
+    row_idx = zh * nb + qb
+    count = counts_ref[row_idx]
     safe_step = jnp.minimum(step, jnp.maximum(count - 1, 0))
-    kb = lists_ref[zh, qb, safe_step]
+    kb = lists_ref[row_idx, safe_step]
 
     mask_shape = (block_size, block_size)
     row_ids = jax.lax.broadcasted_iota(jnp.int32, mask_shape, 0) + qb * block_size
@@ -414,13 +416,15 @@ def _get_cached_tpu_pallas_fn(
     q_dtype,
 ):
     def kv_index_map(zh, qb, step, lists_ref, counts_ref):
-        cnt = counts_ref[zh, qb]
+        row_idx = zh * nb + qb
+        cnt = counts_ref[row_idx]
         safe_step = jnp.minimum(step, jnp.maximum(cnt - 1, 0))
-        kb = lists_ref[zh, qb, safe_step]
+        kb = lists_ref[row_idx, safe_step]
         return (zh, kb, 0, 0)
 
     tpu_kernel = functools.partial(
         _pallas_tpu_block_list_attn_kernel,
+        nb=nb,
         seq_len=seq_len,
         block_size=block_size,
         is_causal=bool(is_causal),
@@ -592,12 +596,13 @@ def pallas_block_list_attention(
         else:
             max_steps = max(1, int(jnp.max(counts_2d)))
 
-        # Slice lists_flat to [:, :, :max_steps] so SMEM only stores active slots,
-        # not all `nb` columns (saves 5-10x SMEM at N=16K..32K).
         lists_trimmed = lists_flat[:, :, :max_steps]
 
-        bytes_per_head = nb * (max_steps + 1) * 4
-        max_heads_per_call = max(1, _TPU_SMEM_BUDGET_BYTES // max(1, bytes_per_head))
+        # On TPU SMEM, 2D arrays are padded to multiples of (8, 128).
+        # Flattening (zh_chunk, nb) -> (zh_chunk * nb,) ensures only `max_steps` is padded to 128.
+        padded_cols = math.ceil(max_steps / 128) * 128
+        padded_bytes_per_head = nb * (padded_cols + 1) * 4
+        max_heads_per_call = max(1, _TPU_SMEM_BUDGET_BYTES // max(1, padded_bytes_per_head))
         zh_chunk = ZH
         while zh_chunk > max_heads_per_call or (ZH % zh_chunk != 0):
             zh_chunk -= 1
@@ -618,7 +623,12 @@ def pallas_block_list_attention(
         )
         if zh_chunk == ZH:
             out_blocks = _call_with_mosaic_version_fallback(
-                pallas_fn, lists_trimmed, counts_2d, q_blocks, k_blocks, v_blocks
+                pallas_fn,
+                lists_trimmed.reshape(ZH * nb, max_steps),
+                counts_2d.reshape(ZH * nb),
+                q_blocks,
+                k_blocks,
+                v_blocks,
             )
         else:
             chunks = []
@@ -627,8 +637,8 @@ def pallas_block_list_attention(
                 chunks.append(
                     _call_with_mosaic_version_fallback(
                         pallas_fn,
-                        lists_trimmed[start_zh:end_zh],
-                        counts_2d[start_zh:end_zh],
+                        lists_trimmed[start_zh:end_zh].reshape(zh_chunk * nb, max_steps),
+                        counts_2d[start_zh:end_zh].reshape(zh_chunk * nb),
                         q_blocks[start_zh:end_zh],
                         k_blocks[start_zh:end_zh],
                         v_blocks[start_zh:end_zh],
