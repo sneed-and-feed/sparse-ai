@@ -1,0 +1,129 @@
+{
+  "meta": {
+    "date": "2026-10-14T04:34:09.842565+00:00",
+    "git_sha": "d5db6f03d9ab4c13769f8fd19dc39a7fd93773ad",
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "torch": "2.11.0+cu130",
+    "model_id": "google/gemma-4-26B-A4B-it",
+    "args": {
+      "model_id": "google/gemma-4-26B-A4B-it",
+      "depths": "2,3,4",
+      "max_samples": 50,
+      "max_ctx": 6000,
+      "max_new_tokens": 128,
+      "train_steps": 80,
+      "train_max_length": 2048,
+      "skip_warmup": false,
+      "init_mode": "collapse",
+      "tree_mode": false,
+      "qk_mode": true,
+      "prime_arities": "2,3",
+      "swin_shift": true,
+      "route_stride": 1,
+      "distill_kl": true,
+      "target_density": 0.25,
+      "only_global_layers": true,
+      "no_window_baseline": false,
+      "seed": 0,
+      "output_dir": "/content/sparse-ai/results_gemma4",
+      "attention_backend": "block_list",
+      "oracle_mode": false,
+      "kolibri_rope": false
+    },
+    "n_samples": 50,
+    "n_truncated": 12,
+    "router": {
+      "tree_depth": 5,
+      "arity": 2,
+      "preserve_sinks": true,
+      "warmup": "wikitext-2 x 80 steps"
+    },
+    "metric": "LongBench qa_f1 (first line of prediction, max over references)"
+  },
+  "results": {
+    "dense": {
+      "f1": 40.32238920165924,
+      "f1_ci95": [
+        30.951537399933365,
+        50.15575585211553
+      ],
+      "n": 50,
+      "degenerate_outputs": 0
+    },
+    "routed@2": {
+      "f1": 35.44431835501043,
+      "f1_ci95": [
+        26.527324601342105,
+        44.9825978439491
+      ],
+      "n": 50,
+      "degenerate_outputs": 0,
+      "measured_allowed_fraction": 0.8167865557874111,
+      "theoretical_fraction": 0.25,
+      "minus_window_f1": 0.3540055399460151,
+      "minus_window_ci95": [
+        -9.384084740593769,
+        9.414747949830721
+      ]
+    },
+    "routed@3": {
+      "f1": 35.4160812629291,
+      "f1_ci95": [
+        26.692569597749642,
+        45.011584770524756
+      ],
+      "n": 50,
+      "degenerate_outputs": 0,
+      "measured_allowed_fraction": 0.7650461328034376,
+      "theoretical_fraction": 0.125,
+      "minus_window_f1": 2.8562186706632526,
+      "minus_window_ci95": [
+        -6.486563937599721,
+        12.484542622004085
+      ]
+    },
+    "routed@4": {
+      "f1": 29.23542582388673,
+      "f1_ci95": [
+        21.327984250895657,
+        37.85826567760742
+      ],
+      "n": 50,
+      "degenerate_outputs": 0,
+      "measured_allowed_fraction": 0.7192702709330442,
+      "theoretical_fraction": 0.0625,
+      "minus_window_f1": -2.7937473724083928,
+      "minus_window_ci95": [
+        -14.473646049016606,
+        7.672477996082951
+      ]
+    },
+    "window@2": {
+      "f1": 35.090312815064415,
+      "f1_ci95": [
+        25.528022585261077,
+        45.5366263324567
+      ],
+      "n": 50,
+      "degenerate_outputs": 0
+    },
+    "window@3": {
+      "f1": 32.559862592265844,
+      "f1_ci95": [
+        22.848077412783294,
+        43.03575492461951
+      ],
+      "n": 50,
+      "degenerate_outputs": 0
+    },
+    "window@4": {
+      "f1": 32.02917319629512,
+      "f1_ci95": [
+        22.645925597332248,
+        42.584735321651294
+      ],
+      "n": 50,
+      "degenerate_outputs": 0
+    }
+  }
+}
