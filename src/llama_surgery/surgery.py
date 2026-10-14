@@ -112,6 +112,27 @@ class SurgeryLossRamp(nn.Module):
         sparsity_penalty = (1.0 - g_h).mean()
         return lambda_t * sparsity_penalty
 
+def _cfg_attr(cfg, attr: str, default=None, layer_idx: Optional[int] = None):
+    """Safely read config attributes on both homogeneous and heterogeneous (Gemma 4) configs."""
+    if layer_idx is not None:
+        per_layer = getattr(cfg, "per_layer_config", None)
+        if per_layer is not None and 0 <= layer_idx < len(per_layer):
+            try:
+                val = getattr(per_layer[layer_idx], attr, None)
+                if val is not None:
+                    return val
+            except Exception:
+                pass
+    try:
+        val = getattr(cfg, attr, default)
+        return default if val is None else val
+    except Exception:
+        d = getattr(cfg, "__dict__", {})
+        if attr in d and d[attr] is not None:
+            return d[attr]
+        return default
+
+
 class SurgicalLlamaAttention(nn.Module):
     """
     Llama Attention modified for Continuous Sparsification (Surgery).
@@ -130,59 +151,74 @@ class SurgicalLlamaAttention(nn.Module):
     ):
         super().__init__()
         self.config = config
+        self.root_config = None
         self.layer_idx = layer_idx
+        self.patched_layer_idx = layer_idx
 
-        self.embed_dim = config.hidden_size
-        self.num_heads = num_heads_override if num_heads_override is not None else config.num_attention_heads
+        # Gemma 4 KV-sharing & layer-type metadata (populated by patch_llama_model if applicable)
+        self.is_kv_shared_layer = False
+        self.store_full_length_kv = False
+        self.layer_type = None
+        self.is_sliding = False
+        self.sliding_window = None
+        self.is_causal = True
+
+        self.embed_dim = _cfg_attr(config, "hidden_size", 4096, layer_idx=layer_idx)
+        self.num_heads = (
+            num_heads_override
+            if num_heads_override is not None
+            else _cfg_attr(config, "num_attention_heads", 32, layer_idx=layer_idx)
+        )
         self.head_dim = (
             head_dim_override
             if head_dim_override is not None
-            else getattr(config, "head_dim", self.embed_dim // self.num_heads)
+            else _cfg_attr(config, "head_dim", self.embed_dim // max(1, self.num_heads), layer_idx=layer_idx)
         )
 
         # GQA compliance
         self.num_key_value_heads = (
             num_kv_heads_override
             if num_kv_heads_override is not None
-            else getattr(config, "num_key_value_heads", self.num_heads)
+            else _cfg_attr(config, "num_key_value_heads", self.num_heads, layer_idx=layer_idx)
         )
         self.num_key_value_groups = max(1, self.num_heads // max(1, self.num_key_value_heads))
 
         # Get surgery-specific config params, default to some values if not present
-        self.p = getattr(config, "surgical_p", 2)
-        self.alpha = getattr(config, "surgical_alpha", 10000.0)
-        self.qk_mode = bool(getattr(config, "surgical_qk_mode", False))
-        self.prime_arities = getattr(config, "surgical_prime_arities", None)
-        self.swin_shift = bool(getattr(config, "surgical_swin_shift", False))
-        self.route_stride = int(getattr(config, "surgical_route_stride", 1))
-        self.distill_kl = bool(getattr(config, "surgical_distill_kl", False))
-        self.target_density = float(getattr(config, "surgical_target_density", 0.25))
+        self.p = _cfg_attr(config, "surgical_p", 2)
+        self.alpha = _cfg_attr(config, "surgical_alpha", 10000.0)
+        self.qk_mode = bool(_cfg_attr(config, "surgical_qk_mode", False))
+        self.prime_arities = _cfg_attr(config, "surgical_prime_arities", None)
+        self.swin_shift = bool(_cfg_attr(config, "surgical_swin_shift", False))
+        self.route_stride = int(_cfg_attr(config, "surgical_route_stride", 1))
+        self.distill_kl = bool(_cfg_attr(config, "surgical_distill_kl", False))
+        self.target_density = float(_cfg_attr(config, "surgical_target_density", 0.25))
 
         self.scale = 1.0 / math.sqrt(self.head_dim)
 
-        self.q_proj = nn.Linear(self.embed_dim, self.num_heads * self.head_dim, bias=getattr(config, "attention_bias", False))
-        self.k_proj = nn.Linear(self.embed_dim, self.num_key_value_heads * self.head_dim, bias=getattr(config, "attention_bias", False))
-        self.v_proj = nn.Linear(self.embed_dim, self.num_key_value_heads * self.head_dim, bias=getattr(config, "attention_bias", False))
-        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.embed_dim, bias=getattr(config, "attention_bias", False))
+        attn_bias = bool(_cfg_attr(config, "attention_bias", False, layer_idx=layer_idx))
+        self.q_proj = nn.Linear(self.embed_dim, self.num_heads * self.head_dim, bias=attn_bias)
+        self.k_proj = nn.Linear(self.embed_dim, self.num_key_value_heads * self.head_dim, bias=attn_bias)
+        self.v_proj = nn.Linear(self.embed_dim, self.num_key_value_heads * self.head_dim, bias=attn_bias)
+        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.embed_dim, bias=attn_bias)
 
         # Optional per-head RMSNorm / LayerNorm preserved from modern architectures (Qwen3, Gemma3/4)
         self.q_norm = None
         self.k_norm = None
         self.v_norm = None
 
-        max_pos_embeddings = getattr(config, "max_position_embeddings", 8192)
+        max_pos_embeddings = _cfg_attr(config, "max_position_embeddings", 8192, layer_idx=layer_idx)
         self.rope = RotaryPositionEmbedding(self.head_dim, max_pos_embeddings)
-        self.attn_dropout = nn.Dropout(getattr(config, "attention_dropout", 0.0))
+        self.attn_dropout = nn.Dropout(_cfg_attr(config, "attention_dropout", 0.0, layer_idx=layer_idx))
 
-        init_mode = getattr(config, "surgical_init_mode", "collapse")
+        init_mode = _cfg_attr(config, "surgical_init_mode", "collapse")
         self.router = DynamicTopologyRouter(
             embed_dim=self.embed_dim,
             seq_len=max_pos_embeddings,
             num_heads=self.num_heads,
             p=self.p,
             init_mode=init_mode,
-            levels=getattr(config, "surgical_tree_depth", None),
-            tree_mode=getattr(config, "surgical_tree_mode", False),
+            levels=_cfg_attr(config, "surgical_tree_depth", None),
+            tree_mode=_cfg_attr(config, "surgical_tree_mode", False),
             qk_mode=self.qk_mode,
             head_dim=self.head_dim,
             prime_arities=self.prime_arities,
@@ -254,17 +290,20 @@ class SurgicalLlamaAttention(nn.Module):
         L = k.shape[-2]
         RB = max(1, int(getattr(self.config, "surgical_route_block", 128)))
         stride = max(1, int(getattr(self.config, "surgical_route_stride", self.route_stride)))
+        p_idx = getattr(self, "patched_layer_idx", None)
+        if p_idx is None:
+            p_idx = self.layer_idx
 
-        # Check cross-layer routing reuse when stride > 1
+        # Check cross-layer routing reuse when stride > 1 (keyed by (H, D, anchor_idx) for heterogeneous safety)
         if (
             stride > 1
-            and self.layer_idx is not None
-            and (self.layer_idx % stride != 0)
+            and p_idx is not None
+            and (p_idx % stride != 0)
             and self._route_cache_ref is not None
         ):
-            anchor_idx = (self.layer_idx // stride) * stride
-            cached = self._route_cache_ref.get(anchor_idx, None)
-            if cached is not None and cached["L"] == L and cached["B"] == B:
+            anchor_key = (H, D, (p_idx // stride) * stride)
+            cached = self._route_cache_ref.get(anchor_key, self._route_cache_ref.get((p_idx // stride) * stride, None))
+            if cached is not None and cached["L"] == L and cached["B"] == B and cached.get("H", H) == H and cached.get("D", D) == D:
                 self._cached_block_assignments = cached["block_assignments"]
                 self._cached_assignments = cached["assignments"]
                 self._cached_q_blk = cached["q_blk"]
@@ -273,8 +312,8 @@ class SurgicalLlamaAttention(nn.Module):
 
         swin_active = (
             bool(getattr(self.config, "surgical_swin_shift", self.swin_shift))
-            and self.layer_idx is not None
-            and (self.layer_idx % 2 == 1)
+            and p_idx is not None
+            and (p_idx % 2 == 1)
             and RB > 1
         )
         shift = (RB // 2) if swin_active else 0
@@ -331,16 +370,21 @@ class SurgicalLlamaAttention(nn.Module):
                 assignments = block_assignments.repeat_interleave(RB, dim=2)[:, :, :L, :, :]
             self._cached_assignments = assignments
 
-        if stride > 1 and self.layer_idx is not None and (self.layer_idx % stride == 0) and self._route_cache_ref is not None:
-            self._route_cache_ref[self.layer_idx] = {
+        if stride > 1 and p_idx is not None and (p_idx % stride == 0) and self._route_cache_ref is not None:
+            entry = {
                 "B": B,
                 "L": L,
+                "H": H,
+                "D": D,
                 "assignments": assignments,
                 "block_assignments": block_assignments,
                 "load_balance_loss": load_balance_loss,
                 "q_blk": self._cached_q_blk,
                 "k_blk": self._cached_k_blk,
             }
+            self._route_cache_ref[(H, D, p_idx)] = entry
+            if self.layer_idx is not None and (self.layer_idx % stride == 0):
+                self._route_cache_ref[self.layer_idx] = entry
 
         return assignments, block_assignments, load_balance_loss
 
@@ -560,13 +604,28 @@ class SurgicalLlamaAttention(nn.Module):
         past_key_values = None,
         **kwargs,
     ):
+        # Sync runtime surgical flags from root model.config when self.config is a nested text_config (e.g. Gemma 4)
+        if getattr(self, "root_config", None) is not None and self.root_config is not self.config:
+            for _k, _v in self.root_config.__dict__.items():
+                if _k.startswith("surgical_") or _k in (
+                    "preserve_sinks",
+                    "use_triton_sparse_attention",
+                    "quantize_kv_cache",
+                    "kv_cache_bits",
+                ):
+                    setattr(self.config, _k, _v)
+
         batch_size, seq_len, _ = hidden_states.size()
         past_key_value = kwargs.get("past_key_value", past_key_values)
+        shared_kv_states = kwargs.get("shared_kv_states", None)
 
         use_block_list = self._block_list_eligible(hidden_states, attention_mask, past_key_value)
         req_depth_cfg = getattr(self.config, "surgical_req_depth", None)
         qk_mode = bool(getattr(self.config, "surgical_qk_mode", self.qk_mode))
         tau = getattr(self.config, "surgical_tau", 1.0)
+        p_idx = getattr(self, "patched_layer_idx", None)
+        if p_idx is None:
+            p_idx = self.layer_idx
 
         block_assignments = None
         if not qk_mode:
@@ -576,14 +635,15 @@ class SurgicalLlamaAttention(nn.Module):
                 assignments = None
             else:
                 stride = max(1, int(getattr(self.config, "surgical_route_stride", self.route_stride)))
+                anchor_key = (self.num_heads, self.head_dim, (p_idx // stride) * stride) if p_idx is not None else None
                 if (
                     stride > 1
-                    and self.layer_idx is not None
-                    and (self.layer_idx % stride != 0)
+                    and p_idx is not None
+                    and (p_idx % stride != 0)
                     and self._route_cache_ref is not None
-                    and ((self.layer_idx // stride) * stride) in self._route_cache_ref
+                    and (anchor_key in self._route_cache_ref or ((p_idx // stride) * stride) in self._route_cache_ref)
                 ):
-                    anchor = self._route_cache_ref[(self.layer_idx // stride) * stride]
+                    anchor = self._route_cache_ref.get(anchor_key, self._route_cache_ref.get((p_idx // stride) * stride))
                     assignments = anchor["assignments"]
                     self.current_penalty = anchor["load_balance_loss"]
                     self._cached_assignments = assignments
@@ -602,18 +662,23 @@ class SurgicalLlamaAttention(nn.Module):
                             assignments = curr_assignments
                             self._cached_assignments = assignments
 
-                    if stride > 1 and self.layer_idx is not None and (self.layer_idx % stride == 0) and self._route_cache_ref is not None:
-                        self._route_cache_ref[self.layer_idx] = {
+                    if stride > 1 and p_idx is not None and (p_idx % stride == 0) and self._route_cache_ref is not None:
+                        entry = {
                             "B": batch_size,
                             "L": assignments.shape[2],
+                            "H": self.num_heads,
+                            "D": self.head_dim,
                             "assignments": assignments,
                             "block_assignments": None,
                             "load_balance_loss": load_balance_loss,
                             "q_blk": None,
                             "k_blk": None,
                         }
+                        self._route_cache_ref[(self.num_heads, self.head_dim, p_idx)] = entry
+                        if self.layer_idx is not None and (self.layer_idx % stride == 0):
+                            self._route_cache_ref[self.layer_idx] = entry
 
-        # Project Q, K, V (with support for Qwen 3.5 / 3.6 gated q_proj and Gemma 4 k_eq_v)
+        # Project Q, K, V (with support for Qwen 3.5 / 3.6 gated q_proj and Gemma 4 k_eq_v + KV sharing)
         q_proj_out = self.q_proj(hidden_states)
         if q_proj_out.shape[-1] == 2 * self.num_heads * self.head_dim:
             q_raw, attn_gate = torch.chunk(q_proj_out, 2, dim=-1)
@@ -621,33 +686,39 @@ class SurgicalLlamaAttention(nn.Module):
             q_raw, attn_gate = q_proj_out, None
 
         q = q_raw.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        k = self.k_proj(hidden_states).view(batch_size, seq_len, self.num_key_value_heads, self.head_dim)
-        if self.v_proj is not None:
-            v = self.v_proj(hidden_states).view(batch_size, seq_len, self.num_key_value_heads, self.head_dim)
-        else:
-            v = k.clone()
-
         if getattr(self, "q_norm", None) is not None:
             q = self.q_norm(q)
-        if getattr(self, "k_norm", None) is not None:
-            k = self.k_norm(k)
-        if getattr(self, "v_norm", None) is not None:
-            v = self.v_norm(v)
-
         q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
 
-        # Apply KV cache fake quantization if enabled (QAT)
-        if getattr(self.config, "quantize_kv_cache", False):
-            from .qat import FakeQuantizeSTE
-            kv_bits = getattr(self.config, "kv_cache_bits", 4)
-            q_min = - (2 ** (kv_bits - 1))
-            q_max = (2 ** (kv_bits - 1)) - 1
-            k_scale = k.abs().max(dim=-1, keepdim=True).values / q_max
-            v_scale = v.abs().max(dim=-1, keepdim=True).values / q_max
-            k = FakeQuantizeSTE.apply(k, kv_bits, k_scale, q_min, q_max)
-            v = FakeQuantizeSTE.apply(v, kv_bits, v_scale, q_min, q_max)
+        is_kv_shared = bool(getattr(self, "is_kv_shared_layer", False)) and (
+            shared_kv_states is not None and getattr(self, "layer_type", None) in shared_kv_states
+        )
+
+        if not is_kv_shared:
+            k = self.k_proj(hidden_states).view(batch_size, seq_len, self.num_key_value_heads, self.head_dim)
+            if self.v_proj is not None:
+                v = self.v_proj(hidden_states).view(batch_size, seq_len, self.num_key_value_heads, self.head_dim)
+            else:
+                v = k.clone()
+
+            if getattr(self, "k_norm", None) is not None:
+                k = self.k_norm(k)
+            if getattr(self, "v_norm", None) is not None:
+                v = self.v_norm(v)
+
+            k = k.transpose(1, 2)
+            v = v.transpose(1, 2)
+
+            # Apply KV cache fake quantization if enabled (QAT)
+            if getattr(self.config, "quantize_kv_cache", False):
+                from .qat import FakeQuantizeSTE
+                kv_bits = getattr(self.config, "kv_cache_bits", 4)
+                q_min = - (2 ** (kv_bits - 1))
+                q_max = (2 ** (kv_bits - 1)) - 1
+                k_scale = k.abs().max(dim=-1, keepdim=True).values / q_max
+                v_scale = v.abs().max(dim=-1, keepdim=True).values / q_max
+                k = FakeQuantizeSTE.apply(k, kv_bits, k_scale, q_min, q_max)
+                v = FakeQuantizeSTE.apply(v, kv_bits, v_scale, q_min, q_max)
 
         # Apply RoPE
         skip_rope = getattr(self.config, "surgical_kolibri_rope", False) and getattr(self, "layer_idx", -1) % 5 == 0
@@ -661,20 +732,39 @@ class SurgicalLlamaAttention(nn.Module):
             def rotate_half(x):
                 x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
                 return torch.cat((-x2, x1), dim=-1)
-            q = (q * cos) + (rotate_half(q) * sin)
-            k = (k * cos) + (rotate_half(k) * sin)
+            rot_dim = cos.shape[-1]
+            if rot_dim < q.shape[-1]:
+                q_rot, q_pass = q[..., :rot_dim], q[..., rot_dim:]
+                q = torch.cat([(q_rot * cos) + (rotate_half(q_rot) * sin), q_pass], dim=-1)
+                if not is_kv_shared:
+                    k_rot, k_pass = k[..., :rot_dim], k[..., rot_dim:]
+                    k = torch.cat([(k_rot * cos) + (rotate_half(k_rot) * sin), k_pass], dim=-1)
+            else:
+                q = (q * cos) + (rotate_half(q) * sin)
+                if not is_kv_shared:
+                    k = (k * cos) + (rotate_half(k) * sin)
         else:
             cos, sin = self.rope(q)
-            q, k = apply_rotary_pos_emb(q, k, cos, sin)
+            if is_kv_shared:
+                q, _ = apply_rotary_pos_emb(q, q, cos, sin)
+            else:
+                q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
-        if past_key_value is not None:
-            if hasattr(past_key_value, "update"):
-                cache_kwargs = {"sin": getattr(self, "_dummy", None), "cos": getattr(self, "_dummy", None)}
-                k, v = past_key_value.update(k, v, self.layer_idx, cache_kwargs)
-            elif isinstance(past_key_value, tuple):
-                k = torch.cat([past_key_value[0], k], dim=-2)
-                v = torch.cat([past_key_value[1], v], dim=-2)
-                past_key_value = (k, v)
+        if is_kv_shared:
+            k, v = shared_kv_states[self.layer_type]
+            k = k.to(q.device)
+            v = v.to(q.device)
+        else:
+            if past_key_value is not None:
+                if hasattr(past_key_value, "update"):
+                    cache_kwargs = {"sin": getattr(self, "_dummy", None), "cos": getattr(self, "_dummy", None)}
+                    k, v = past_key_value.update(k, v, self.layer_idx, cache_kwargs)
+                elif isinstance(past_key_value, tuple):
+                    k = torch.cat([past_key_value[0], k], dim=-2)
+                    v = torch.cat([past_key_value[1], v], dim=-2)
+                    past_key_value = (k, v)
+            if getattr(self, "store_full_length_kv", False) and shared_kv_states is not None and getattr(self, "layer_type", None) is not None:
+                shared_kv_states[self.layer_type] = (k, v)
 
         # Broadcast KV for GQA before attention computation (and before QK routing!)
         k = repeat_kv(k, self.num_key_value_groups)
@@ -703,7 +793,7 @@ class SurgicalLlamaAttention(nn.Module):
                 self.current_distill_loss = None
 
             if req_depth_cfg == 0:
-                out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                out = F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=self.scale)
             else:
                 r = req_depth_cfg if req_depth_cfg is not None else assignments.shape[-2] // 2
                 out = self._block_list_prefill(
@@ -729,20 +819,23 @@ class SurgicalLlamaAttention(nn.Module):
         # Raw attention scores
         scores = torch.matmul(q.to(torch.float32), k.to(torch.float32).transpose(-2, -1)) * self.scale
 
+        L_kv = k.shape[-2]
         if attention_mask is not None:
-            scores = scores + attention_mask
-        else:
-            L_kv = k.shape[-2]
-            if seq_len == L_kv:
-                causal_mask = torch.triu(
-                    torch.ones(seq_len, L_kv, dtype=torch.bool, device=hidden_states.device), diagonal=1
-                )
-                scores = scores.masked_fill(causal_mask, float('-inf'))
-            elif seq_len > 1:
-                idx_q = torch.arange(L_kv - seq_len, L_kv, device=hidden_states.device)
-                idx_k = torch.arange(L_kv, device=hidden_states.device)
-                causal_mask = idx_k.unsqueeze(0) > idx_q.unsqueeze(1)
-                scores = scores.masked_fill(causal_mask, float('-inf'))
+            mask_slice = attention_mask[..., :seq_len, :L_kv]
+            if mask_slice.dtype == torch.bool:
+                scores = scores.masked_fill(~mask_slice, float("-inf"))
+            else:
+                scores = scores + mask_slice
+        if seq_len == L_kv and seq_len > 1:
+            causal_mask = torch.triu(
+                torch.ones(seq_len, L_kv, dtype=torch.bool, device=hidden_states.device), diagonal=1
+            )
+            scores = scores.masked_fill(causal_mask, float('-inf'))
+        elif seq_len > 1:
+            idx_q = torch.arange(L_kv - seq_len, L_kv, device=hidden_states.device)
+            idx_k = torch.arange(L_kv, device=hidden_states.device)
+            causal_mask = idx_k.unsqueeze(0) > idx_q.unsqueeze(1)
+            scores = scores.masked_fill(causal_mask, float('-inf'))
 
         # Dynamic Sparsification
         L = k.shape[-2]

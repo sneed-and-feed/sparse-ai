@@ -162,11 +162,12 @@ def attn_modules(model):
 
 
 def set_condition(model, req_depth, override=None, window=None, collect=False):
-    cfg = model.config
-    cfg.surgical_req_depth = req_depth
-    cfg.surgical_mask_override = override
-    cfg.surgical_window_size = window
-    cfg.surgical_collect_stats = collect
+    tcfg = getattr(model.config, "text_config", model.config)
+    for cfg in ([model.config] if tcfg is model.config else [model.config, tcfg]):
+        cfg.surgical_req_depth = req_depth
+        cfg.surgical_mask_override = override
+        cfg.surgical_window_size = window
+        cfg.surgical_collect_stats = collect
     if hasattr(model, "_surgical_route_cache") and isinstance(model._surgical_route_cache, dict):
         model._surgical_route_cache.clear()
 
@@ -279,16 +280,20 @@ def main():
         target_density=args.target_density,
         only_global_layers=args.only_global_layers,
     )
+    tcfg = getattr(model.config, "text_config", model.config)
+    all_cfgs = [model.config] if tcfg is model.config else [model.config, tcfg]
     if args.attention_backend == "block_list":
-        model.config.surgical_attention_backend = "block_list"
+        for cfg in all_cfgs:
+            cfg.surgical_attention_backend = "block_list"
     if not args.skip_warmup:
         print(f"[3/4] WikiText warmup ({args.train_steps} steps, max_length={args.train_max_length})")
         warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda", max_length=args.train_max_length)
     model.eval()
-    model.config.use_cache = True  # HF disables this during gradient checkpointing but doesn't restore it!
-    model.config.surgical_attention_backend = args.attention_backend
-    if args.kolibri_rope:
-        model.config.surgical_kolibri_rope = True
+    for cfg in all_cfgs:
+        cfg.use_cache = True  # HF disables this during gradient checkpointing but doesn't restore it!
+        cfg.surgical_attention_backend = args.attention_backend
+        if args.kolibri_rope:
+            cfg.surgical_kolibri_rope = True
 
     data = load_qasper()[: args.max_samples]
     print(f"[4/4] Evaluating {len(data)} QASPER samples | depths {depths} | "

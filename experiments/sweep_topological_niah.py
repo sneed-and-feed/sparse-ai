@@ -204,12 +204,19 @@ def warmup_router_wikitext(
     """
     print(f"\n[Unsupervised Warmup] Training router on WikiText / natural language text ({steps} steps, max_length={max_length}, LR={lr})...")
     
-    # Freeze backbone, train only routing parameters
-    for name, p in model.named_parameters():
-        if "router" in name or "route" in name:
-            p.requires_grad = True
-        else:
-            p.requires_grad = False
+    # Freeze backbone (including any MoE expert routers like Gemma4TextRouter), train ONLY DynamicTopologyRouter parameters
+    for p in model.parameters():
+        p.requires_grad = False
+    unfroze_any = False
+    for m in model.modules():
+        if m.__class__.__name__ == "DynamicTopologyRouter":
+            for p in m.parameters():
+                p.requires_grad = True
+                unfroze_any = True
+    if not unfroze_any:
+        for name, p in model.named_parameters():
+            if "self_attn.router" in name:
+                p.requires_grad = True
             
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=1e-4)

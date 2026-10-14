@@ -30,6 +30,27 @@ def _discover_decoder_layers(model):
     )
 
 
+def _safe_cfg_attr(cfg, attr: str, default=None, layer_idx: int = None):
+    """Safely read config attributes on both homogeneous and heterogeneous (Gemma 4) configs."""
+    if layer_idx is not None:
+        per_layer = getattr(cfg, "per_layer_config", None)
+        if per_layer is not None and 0 <= layer_idx < len(per_layer):
+            try:
+                val = getattr(per_layer[layer_idx], attr, None)
+                if val is not None:
+                    return val
+            except Exception:
+                pass
+    try:
+        val = getattr(cfg, attr, default)
+        return default if val is None else val
+    except Exception:
+        d = getattr(cfg, "__dict__", {})
+        if attr in d and d[attr] is not None:
+            return d[attr]
+        return default
+
+
 def patch_llama_model(
     model,
     tree_depth: int = 4,
@@ -83,34 +104,56 @@ def patch_llama_model(
 
     model._surgical_route_cache = {}
     layers = _discover_decoder_layers(model)
+    group_counters = {}
 
     for i, layer in enumerate(layers):
         if not hasattr(layer, "self_attn"):
             continue
         old_attn = layer.self_attn
-        if not hasattr(old_attn, "q_proj") or not hasattr(old_attn, "k_proj") or not hasattr(old_attn, "o_proj"):
+        is_kv_shared = bool(getattr(old_attn, "is_kv_shared_layer", False))
+        if not hasattr(old_attn, "q_proj") or not hasattr(old_attn, "o_proj"):
             # Skip non-standard / linear-attention layers in hybrid architectures (e.g. Qwen3_5GatedDeltaNet)
+            continue
+        if not hasattr(old_attn, "k_proj") and not is_kv_shared:
             continue
         if only_global_layers:
             is_sliding = getattr(old_attn, "is_sliding", False) or (
                 getattr(layer, "attention_type", None) == "sliding_attention"
+            ) or (
+                getattr(old_attn, "layer_type", None) == "sliding_attention"
             )
             if is_sliding:
                 continue
 
-        # Infer per-layer head_dim, num_heads, and num_kv_heads from old_attn / weights
+        # Infer per-layer head_dim, num_heads, and num_kv_heads from old_attn / weights / per_layer_config
         q_out, _ = old_attn.q_proj.weight.shape
-        k_out, _ = old_attn.k_proj.weight.shape
         o_in = old_attn.o_proj.weight.shape[1]
 
-        head_dim = getattr(
-            old_attn,
-            "head_dim",
-            getattr(text_config, "head_dim", o_in // max(1, getattr(text_config, "num_attention_heads", 1))),
-        )
+        head_dim = getattr(old_attn, "head_dim", None)
+        if head_dim is None:
+            nh_cfg = _safe_cfg_attr(text_config, "num_attention_heads", 1, layer_idx=i)
+            head_dim = _safe_cfg_attr(text_config, "head_dim", o_in // max(1, nh_cfg), layer_idx=i)
+
         # Note: o_proj input dimension is always num_heads * head_dim (even when q_proj is 2x for gated attention)
-        num_heads = getattr(old_attn, "num_heads", o_in // max(1, head_dim))
-        num_kv_heads = getattr(old_attn, "num_key_value_heads", k_out // max(1, head_dim))
+        num_heads = getattr(old_attn, "num_heads", None)
+        if num_heads is None:
+            num_heads = o_in // max(1, head_dim)
+
+        num_kv_heads = getattr(old_attn, "num_key_value_heads", None)
+        if num_kv_heads is None:
+            if hasattr(old_attn, "k_proj") and old_attn.k_proj is not None:
+                k_out, _ = old_attn.k_proj.weight.shape
+                num_kv_heads = k_out // max(1, head_dim)
+            else:
+                kv_groups = getattr(old_attn, "num_key_value_groups", None)
+                if kv_groups is not None and kv_groups > 0:
+                    num_kv_heads = max(1, num_heads // kv_groups)
+                else:
+                    num_kv_heads = _safe_cfg_attr(text_config, "num_key_value_heads", num_heads, layer_idx=i)
+
+        group_key = (num_heads, head_dim)
+        patched_idx = group_counters.get(group_key, 0)
+        group_counters[group_key] = patched_idx + 1
 
         new_attn = SurgicalLlamaAttention(
             text_config,
@@ -119,9 +162,19 @@ def patch_llama_model(
             num_heads_override=num_heads,
             num_kv_heads_override=num_kv_heads,
         )
+        new_attn.root_config = model.config
+        new_attn.patched_layer_idx = patched_idx
         new_attn._route_cache_ref = model._surgical_route_cache
 
-        # Reuse exact projection modules/weights (supports gated 2x q_proj and k_eq_v where v_proj is None)
+        # Preserve Gemma 4 KV-sharing and layer-type metadata
+        new_attn.is_kv_shared_layer = is_kv_shared
+        new_attn.store_full_length_kv = bool(getattr(old_attn, "store_full_length_kv", False))
+        new_attn.layer_type = getattr(old_attn, "layer_type", None)
+        new_attn.is_sliding = bool(getattr(old_attn, "is_sliding", False))
+        new_attn.sliding_window = getattr(old_attn, "sliding_window", None)
+        new_attn.is_causal = bool(getattr(old_attn, "is_causal", True))
+
+        # Reuse exact projection modules/weights (supports gated 2x q_proj, k_eq_v, and KV-shared layers)
         if q_out != new_attn.q_proj.weight.shape[0]:
             new_attn.q_proj = nn.Linear(
                 old_attn.q_proj.in_features,
@@ -129,7 +182,10 @@ def patch_llama_model(
                 bias=old_attn.q_proj.bias is not None,
             )
         new_attn.q_proj.weight = old_attn.q_proj.weight
-        new_attn.k_proj.weight = old_attn.k_proj.weight
+        if hasattr(old_attn, "k_proj") and old_attn.k_proj is not None:
+            new_attn.k_proj.weight = old_attn.k_proj.weight
+        else:
+            new_attn.k_proj = None
         if hasattr(old_attn, "v_proj") and old_attn.v_proj is not None:
             new_attn.v_proj.weight = old_attn.v_proj.weight
         else:

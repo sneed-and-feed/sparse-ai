@@ -726,19 +726,34 @@ def _block_list_attention_fwd(
         HAS_SOFT_BIAS=has_soft_bias,
     )
 
-    use_autotune = block_m is None and block_n is None and q.is_cuda and not _INTERPRET
+    use_autotune = block_m is None and block_n is None and D <= 128 and q.is_cuda and not _INTERPRET
     if use_autotune:
         grid = lambda META: (triton.cdiv(N, META["BLOCK_M"]), Z * H)  # noqa: E731
         _block_list_fwd_tuned[grid](*args, **meta)
     else:
-        bm = block_m or min(64, route_block)
-        bn = block_n or min(64, route_block)
+        default_bm = 32 if D >= 256 else 64
+        default_bn = 16 if D >= 512 else (32 if D >= 256 else 64)
+        bm = block_m or min(default_bm, route_block)
+        bn = block_n or min(default_bn, route_block)
         if route_block % bm or route_block % bn:
             raise ValueError(f"block_m ({bm}) and block_n ({bn}) must divide route_block ({route_block})")
-        launch = dict(BLOCK_M=bm, BLOCK_N=bn, **meta)
-        if not _INTERPRET:
-            launch.update(num_warps=num_warps, num_stages=num_stages)
-        _block_list_fwd_kernel[(triton.cdiv(N, bm), Z * H)](*args, **launch)
+        fwd_stages = 1 if (D >= 256 and num_stages > 1) else num_stages
+
+        def _launch_fwd_with_params(cur_bm: int, cur_bn: int, cur_stages: int):
+            launch = dict(BLOCK_M=cur_bm, BLOCK_N=cur_bn, **meta)
+            if not _INTERPRET:
+                launch.update(num_warps=num_warps, num_stages=cur_stages)
+            _block_list_fwd_kernel[(triton.cdiv(N, cur_bm), Z * H)](*args, **launch)
+
+        try:
+            _launch_fwd_with_params(bm, bn, fwd_stages)
+        except Exception as e:
+            if "OutOfResources" in type(e).__name__ or "shared memory" in str(e):
+                fb_m = min(16, bm)
+                fb_n = min(16, bn)
+                _launch_fwd_with_params(fb_m, fb_n, 1)
+            else:
+                raise
     return out, lse
 
 
@@ -785,8 +800,9 @@ def _block_list_attention_bwd(
         sb_strides = (0, 0, 0, 0)
         dsb_strides = (0, 0, 0, 0)
 
-    bm = block_m or (min(32, route_block) if D >= 128 else min(64, route_block))
-    bn = block_n or (min(32, route_block) if D >= 128 else min(64, route_block))
+    default_bwd_tile = 16 if D >= 512 else (32 if D >= 128 else 64)
+    bm = block_m or min(default_bwd_tile, route_block)
+    bn = block_n or min(default_bwd_tile, route_block)
     if route_block % bm or route_block % bn:
         raise ValueError(f"block_m ({bm}) and block_n ({bn}) must divide route_block ({route_block})")
 
@@ -819,8 +835,8 @@ def _block_list_attention_bwd(
             if "OutOfResources" in type(e).__name__ or "shared memory" in str(e):
                 if has_soft_bias and d_soft_bias is not None:
                     d_soft_bias.zero_()
-                fb_m = min(32, bm)
-                fb_n = min(32, bn)
+                fb_m = min(16, bm)
+                fb_n = min(16, bn)
                 _launch_dq_with_params(fb_m, fb_n, 1)
             else:
                 raise
@@ -853,8 +869,8 @@ def _block_list_attention_bwd(
                 _launch_dkdv_with_params(bm, bn, bwd_stages)
             except Exception as e:
                 if "OutOfResources" in type(e).__name__ or "shared memory" in str(e):
-                    fb_m = min(32, bm)
-                    fb_n = min(32, bn)
+                    fb_m = min(16, bm)
+                    fb_n = min(16, bn)
                     _launch_dkdv_with_params(fb_m, fb_n, 1)
                 else:
                     raise
