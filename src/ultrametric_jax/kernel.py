@@ -347,6 +347,7 @@ def _pallas_tpu_block_list_attn_kernel(
                 q,
                 k_tile,
                 (((1,), (1,)), ((), ())),
+                precision=jax.lax.Precision.HIGHEST,
                 preferred_element_type=jnp.float32,
             )
             * sm_scale
@@ -370,7 +371,12 @@ def _pallas_tpu_block_list_attn_kernel(
 
         d_model = q.shape[-1]
         alpha_o = _tile_lanes_to_dim(alpha, d_model)
-        o_curr = jax.lax.dot(p, v_tile, preferred_element_type=jnp.float32)
+        o_curr = jax.lax.dot(
+            p,
+            v_tile,
+            precision=jax.lax.Precision.HIGHEST,
+            preferred_element_type=jnp.float32,
+        )
         acc_scratch_ref[...] = acc_prev * alpha_o + o_curr
         m_scratch_ref[...] = m_new
 
