@@ -1,6 +1,35 @@
 import torch.nn as nn
 from .surgery import SurgicalLlamaAttention
 
+
+def _discover_decoder_layers(model):
+    """
+    Discovers the decoder layer ModuleList across standard and multimodal-wrapped
+    HuggingFace causal LM architectures (Llama, Qwen2/3, Qwen3.5/3.6, Gemma2/3/4, Mistral).
+    """
+    if hasattr(model, "model"):
+        m = model.model
+        if hasattr(m, "language_model"):
+            lm = m.language_model
+            if hasattr(lm, "layers"):
+                return lm.layers
+            if hasattr(lm, "model") and hasattr(lm.model, "layers"):
+                return lm.model.layers
+        if hasattr(m, "layers"):
+            return m.layers
+    if hasattr(model, "language_model"):
+        lm = model.language_model
+        if hasattr(lm, "model") and hasattr(lm.model, "layers"):
+            return lm.model.layers
+        if hasattr(lm, "layers"):
+            return lm.layers
+    if hasattr(model, "layers"):
+        return model.layers
+    raise AttributeError(
+        f"Could not locate decoder `.layers` on model of type {type(model).__name__}"
+    )
+
+
 def patch_llama_model(
     model,
     tree_depth: int = 4,
@@ -10,56 +39,128 @@ def patch_llama_model(
     req_depth: int = None,
     max_dist: int = None,
     init_mode: str = "collapse",
+    qk_mode: bool = False,
+    prime_arities = None,
+    swin_shift: bool = False,
+    route_stride: int = 1,
+    distill_kl: bool = False,
+    target_density: float = 0.25,
+    route_block: int = 128,
+    only_global_layers: bool = False,
     **kwargs
 ):
     """
-    Surgically injects Dynamic Topology Routers into a pre-trained LLaMA model,
-    replacing self_attn layers with SurgicalLlamaAttention and transferring pre-trained weights.
+    Surgically injects Dynamic Topology Routers into a pre-trained causal LM
+    (Llama, Qwen2/3, Qwen3.5/3.6, Gemma2/3/4, Mistral), replacing self_attn layers
+    with SurgicalLlamaAttention and transferring pre-trained weights, scaling, and Q/K/V norms.
     """
-    setattr(model.config, "surgical_p", arity)
-    setattr(model.config, "surgical_tree_mode", kwargs.get("tree_mode", False))
-    setattr(model.config, "surgical_tree_depth", tree_depth)
-    setattr(model.config, "surgical_tau_init", tau_init)
-    setattr(model.config, "preserve_sinks", preserve_sinks)
-    setattr(model.config, "surgical_init_mode", init_mode)
-    if req_depth is not None:
-        setattr(model.config, "surgical_req_depth", req_depth)
-    if max_dist is not None:
-        setattr(model.config, "surgical_max_dist", max_dist)
+    text_config = getattr(model.config, "text_config", model.config)
+    configs = [model.config] if text_config is model.config else [model.config, text_config]
 
-    for i, layer in enumerate(model.model.layers):
+    for cfg in configs:
+        setattr(cfg, "surgical_p", arity)
+        setattr(cfg, "surgical_tree_mode", kwargs.get("tree_mode", False))
+        setattr(cfg, "surgical_tree_depth", tree_depth)
+        setattr(cfg, "surgical_tau_init", tau_init)
+        setattr(cfg, "surgical_tau", kwargs.get("tau", tau_init))
+        setattr(cfg, "preserve_sinks", preserve_sinks)
+        setattr(cfg, "surgical_init_mode", init_mode)
+        setattr(cfg, "surgical_qk_mode", qk_mode)
+        setattr(cfg, "surgical_prime_arities", prime_arities)
+        setattr(cfg, "surgical_swin_shift", swin_shift)
+        setattr(cfg, "surgical_route_stride", route_stride)
+        setattr(cfg, "surgical_distill_kl", distill_kl)
+        setattr(cfg, "surgical_target_density", target_density)
+        setattr(cfg, "surgical_route_block", route_block)
+        if "local_window" in kwargs:
+            setattr(cfg, "surgical_local_window", kwargs["local_window"])
+        if "attention_backend" in kwargs:
+            setattr(cfg, "surgical_attention_backend", kwargs["attention_backend"])
+        if req_depth is not None:
+            setattr(cfg, "surgical_req_depth", req_depth)
+        if max_dist is not None:
+            setattr(cfg, "surgical_max_dist", max_dist)
+
+    model._surgical_route_cache = {}
+    layers = _discover_decoder_layers(model)
+
+    for i, layer in enumerate(layers):
+        if not hasattr(layer, "self_attn"):
+            continue
         old_attn = layer.self_attn
-        
-        # Instantiate new attention
-        new_attn = SurgicalLlamaAttention(model.config, layer_idx=i)
-        
-        # Copy weights
+        if not hasattr(old_attn, "q_proj") or not hasattr(old_attn, "k_proj") or not hasattr(old_attn, "o_proj"):
+            # Skip non-standard / linear-attention layers in hybrid architectures (e.g. Qwen3_5GatedDeltaNet)
+            continue
+        if only_global_layers:
+            is_sliding = getattr(old_attn, "is_sliding", False) or (
+                getattr(layer, "attention_type", None) == "sliding_attention"
+            )
+            if is_sliding:
+                continue
+
+        # Infer per-layer head_dim, num_heads, and num_kv_heads from old_attn / weights
+        q_out, _ = old_attn.q_proj.weight.shape
+        k_out, _ = old_attn.k_proj.weight.shape
+        o_in = old_attn.o_proj.weight.shape[1]
+
+        head_dim = getattr(
+            old_attn,
+            "head_dim",
+            getattr(text_config, "head_dim", o_in // max(1, getattr(text_config, "num_attention_heads", 1))),
+        )
+        # Note: o_proj input dimension is always num_heads * head_dim (even when q_proj is 2x for gated attention)
+        num_heads = getattr(old_attn, "num_heads", o_in // max(1, head_dim))
+        num_kv_heads = getattr(old_attn, "num_key_value_heads", k_out // max(1, head_dim))
+
+        new_attn = SurgicalLlamaAttention(
+            text_config,
+            layer_idx=i,
+            head_dim_override=head_dim,
+            num_heads_override=num_heads,
+            num_kv_heads_override=num_kv_heads,
+        )
+        new_attn._route_cache_ref = model._surgical_route_cache
+
+        # Reuse exact projection modules/weights (supports gated 2x q_proj and k_eq_v where v_proj is None)
+        if q_out != new_attn.q_proj.weight.shape[0]:
+            new_attn.q_proj = nn.Linear(
+                old_attn.q_proj.in_features,
+                old_attn.q_proj.out_features,
+                bias=old_attn.q_proj.bias is not None,
+            )
         new_attn.q_proj.weight = old_attn.q_proj.weight
         new_attn.k_proj.weight = old_attn.k_proj.weight
-        new_attn.v_proj.weight = old_attn.v_proj.weight
+        if hasattr(old_attn, "v_proj") and old_attn.v_proj is not None:
+            new_attn.v_proj.weight = old_attn.v_proj.weight
+        else:
+            new_attn.v_proj = None
         new_attn.o_proj.weight = old_attn.o_proj.weight
-        
-        # If bias exists, copy that too
-        if hasattr(old_attn.q_proj, 'bias') and old_attn.q_proj.bias is not None:
-            new_attn.q_proj.bias = old_attn.q_proj.bias
-        if hasattr(old_attn.k_proj, 'bias') and old_attn.k_proj.bias is not None:
-            new_attn.k_proj.bias = old_attn.k_proj.bias
-        if hasattr(old_attn.v_proj, 'bias') and old_attn.v_proj.bias is not None:
-            new_attn.v_proj.bias = old_attn.v_proj.bias
-        if hasattr(old_attn.o_proj, 'bias') and old_attn.o_proj.bias is not None:
-            new_attn.o_proj.bias = old_attn.o_proj.bias
+
+        # Copy projection biases if present
+        for proj_name in ("q_proj", "k_proj", "v_proj", "o_proj"):
+            old_proj = getattr(old_attn, proj_name, None)
+            new_proj = getattr(new_attn, proj_name, None)
+            if old_proj is not None and new_proj is not None and hasattr(old_proj, "bias") and old_proj.bias is not None:
+                new_proj.bias = old_proj.bias
+
+        # Preserve q_norm / k_norm / v_norm and custom scaling if present (e.g., Qwen3/3.5, Gemma3/4)
+        new_attn.q_norm = getattr(old_attn, "q_norm", None)
+        new_attn.k_norm = getattr(old_attn, "k_norm", None)
+        new_attn.v_norm = getattr(old_attn, "v_norm", None)
+        new_attn.scale = getattr(old_attn, "scaling", new_attn.scale)
 
         # Move to the same device and dtype
         new_attn.to(old_attn.q_proj.weight.device, dtype=old_attn.q_proj.weight.dtype)
-        
+
         # Replace the module
         layer.self_attn = new_attn
-    
+
     return model
+
 
 def inject_surgery(model, **kwargs):
     """
-    Iterates over model.model.layers, replaces self_attn with SurgicalLlamaAttention,
+    Iterates over decoder layers, replaces self_attn with SurgicalLlamaAttention,
     and copies over the pre-trained q_proj, k_proj, v_proj, o_proj weights.
     """
     return patch_llama_model(model, **kwargs)

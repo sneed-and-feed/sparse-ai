@@ -150,7 +150,15 @@ def bootstrap_ci(xs, n=2000, seed=0):
 # ----------------------------------------------------------------------------
 
 def attn_modules(model):
-    return [l.self_attn for l in model.model.layers]
+    if hasattr(model, "model") and hasattr(model.model, "language_model") and hasattr(model.model.language_model, "layers"):
+        layers = model.model.language_model.layers
+    elif hasattr(model, "language_model") and hasattr(model.language_model, "layers"):
+        layers = model.language_model.layers
+    elif hasattr(model, "model") and hasattr(model.model, "layers"):
+        layers = model.model.layers
+    else:
+        layers = getattr(model, "layers", [])
+    return [l.self_attn for l in layers if hasattr(l, "self_attn") and l.self_attn is not None]
 
 
 def set_condition(model, req_depth, override=None, window=None, collect=False):
@@ -159,6 +167,8 @@ def set_condition(model, req_depth, override=None, window=None, collect=False):
     cfg.surgical_mask_override = override
     cfg.surgical_window_size = window
     cfg.surgical_collect_stats = collect
+    if hasattr(model, "_surgical_route_cache") and isinstance(model._surgical_route_cache, dict):
+        model._surgical_route_cache.clear()
 
 
 def measured_budget(model):
@@ -177,6 +187,8 @@ def measured_budget(model):
 @torch.no_grad()
 def generate(model, tokenizer, input_ids, max_new_tokens):
     input_ids = input_ids.to(model.device)
+    if hasattr(model, "_surgical_route_cache") and isinstance(model._surgical_route_cache, dict):
+        model._surgical_route_cache.clear()
     out = model.generate(
         input_ids=input_ids,
         attention_mask=torch.ones_like(input_ids),
@@ -210,9 +222,17 @@ def main():
     ap.add_argument("--max_ctx", type=int, default=6000, help="Prompt tokens before middle-truncation")
     ap.add_argument("--max_new_tokens", type=int, default=128)
     ap.add_argument("--train_steps", type=int, default=80, help="WikiText warmup steps (3F used 80)")
+    ap.add_argument("--train_max_length", type=int, default=2048, help="Token length per WikiText warmup step")
     ap.add_argument("--skip_warmup", action="store_true", help="Untrained router (3E-style control)")
     ap.add_argument("--init_mode", default="collapse", choices=["collapse", "random"])
     ap.add_argument("--tree_mode", action="store_true", help="Use Option B: true tree router")
+    ap.add_argument("--qk_mode", action="store_true", help="Post-RoPE block-pooled (Q,K) routing (Fixes R1 & R5)")
+    ap.add_argument("--prime_arities", default="", help="Comma-separated multi-prime head group arities, e.g. '2,3' (Fixes R2)")
+    ap.add_argument("--swin_shift", action="store_true", help="Odd-layer Swin cyclic block shifting (Fixes R3)")
+    ap.add_argument("--route_stride", type=int, default=1, help="Cross-layer routing reuse stride (e.g. 4)")
+    ap.add_argument("--distill_kl", action="store_true", help="Block-level KL distillation + Dual Lagrangian density penalty")
+    ap.add_argument("--target_density", type=float, default=0.25, help="Target active block density for Dual Lagrangian")
+    ap.add_argument("--only_global_layers", action="store_true", help="Patch only global full-attention layers (for Gemma 3/4)")
     ap.add_argument("--no_window_baseline", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--output_dir", default="experiments/results")
@@ -227,6 +247,7 @@ def main():
     torch.manual_seed(args.seed)
     depths = [int(d) for d in args.depths.split(",") if d.strip()]
     assert all(d > 0 for d in depths), "r=0 (dense) is always run; pass only r > 0"
+    prime_arities = [int(p) for p in args.prime_arities.split(",") if p.strip()] or None
 
     os.makedirs(args.output_dir, exist_ok=True)
     suffix = "" if args.attention_backend == "eager" else f"_{args.attention_backend}"
@@ -242,11 +263,27 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args.model_id, torch_dtype=dtype,
                                                  device_map="cuda", token=hf_token)
 
-    print("[2/4] Injecting router (tree_depth=5, arity=2, sinks)")
-    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True, init_mode=args.init_mode, tree_mode=args.tree_mode)
+    print(f"[2/4] Injecting router (tree_depth=5, arity=2, qk_mode={args.qk_mode}, primes={prime_arities}, swin={args.swin_shift})")
+    model = inject_surgery(
+        model,
+        tree_depth=5,
+        arity=2,
+        preserve_sinks=True,
+        init_mode=args.init_mode,
+        tree_mode=args.tree_mode,
+        qk_mode=args.qk_mode,
+        prime_arities=prime_arities,
+        swin_shift=args.swin_shift,
+        route_stride=args.route_stride,
+        distill_kl=args.distill_kl,
+        target_density=args.target_density,
+        only_global_layers=args.only_global_layers,
+    )
+    if args.attention_backend == "block_list":
+        model.config.surgical_attention_backend = "block_list"
     if not args.skip_warmup:
-        print(f"[3/4] WikiText warmup ({args.train_steps} steps; same recipe as 3F)")
-        warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda")
+        print(f"[3/4] WikiText warmup ({args.train_steps} steps, max_length={args.train_max_length})")
+        warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda", max_length=args.train_max_length)
     model.eval()
     model.config.use_cache = True  # HF disables this during gradient checkpointing but doesn't restore it!
     model.config.surgical_attention_backend = args.attention_backend

@@ -30,6 +30,7 @@ from .kernel import (
 from .block_list import (
     BlockLists,
     build_block_lists,
+    build_transposed_block_lists,
     block_list_attention,
     routed_block_attention,
 )
@@ -56,6 +57,7 @@ __all__ = [
     # Block-list kernel (runtime-length per-row lists)
     "BlockLists",
     "build_block_lists",
+    "build_transposed_block_lists",
     "block_list_attention",
     "routed_block_attention",
 ]

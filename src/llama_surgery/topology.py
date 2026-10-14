@@ -14,16 +14,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 
 class DynamicTopologyRouter(nn.Module):
     """
-    Multi-Head Dynamic Topology Router.
+    Multi-Head Dynamic Topology Router (Supports QK-Mode and Multi-Prime Adèlic Head Groups).
 
-    Projects token embeddings into per-head recursive p-adic tree paths.
-    Each head gets its own routing decision at every level of the Bruhat-Tits
-    tree, producing a genuinely nested hierarchical mask — not a flat partition.
+    Projects token embeddings (or per-head block-pooled post-RoPE QK descriptors)
+    into per-head recursive p-adic tree paths. Each head gets its own routing
+    decision at every level of the Bruhat-Tits tree, producing a genuinely
+    nested hierarchical mask — not a flat partition.
 
     Args:
         embed_dim: token embedding dimension
@@ -32,6 +33,14 @@ class DynamicTopologyRouter(nn.Module):
         p: tree arity (2 = binary Bruhat-Tits tree)
         tau: Gumbel-Softmax temperature (higher = softer routing)
         hard: if True, use straight-through estimator for discrete routing
+        init_mode: "collapse" (deterministic step-0 identity) or "random"
+        levels: optional explicit tree depth
+        tree_mode: if True, parameterize full internal nodes of the tree
+        qk_mode: if True, routes directly on post-RoPE block-pooled Q/K descriptors
+                 of shape (batch, num_heads, num_blocks, 2 * head_dim)
+        head_dim: per-head dimension when qk_mode=True (defaults to embed_dim // num_heads)
+        prime_arities: optional sequence of prime arities across GQA head groups
+                       (e.g. [2, 3]), partitioning heads into contiguous prime groups
     """
 
     def __init__(
@@ -45,28 +54,60 @@ class DynamicTopologyRouter(nn.Module):
         init_mode: str = "collapse",
         levels: Optional[int] = None,
         tree_mode: bool = False,
+        qk_mode: bool = False,
+        head_dim: Optional[int] = None,
+        prime_arities: Optional[Sequence[int]] = None,
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
-        self.p = p
         self.tau = tau
         self.hard = hard
         self.init_mode = init_mode
-        self.levels = levels if levels is not None else int(math.ceil(math.log(max(seq_len, 2), p)))
         self.tree_mode = tree_mode
+        self.qk_mode = qk_mode
+        self.head_dim = head_dim if head_dim is not None else max(1, embed_dim // max(1, num_heads))
+
+        if prime_arities is not None and len(prime_arities) > 0:
+            self.prime_arities = [int(pa) for pa in prime_arities]
+            self.p = max(self.prime_arities)
+            num_groups = len(self.prime_arities)
+            self.head_arities = []
+            for h in range(num_heads):
+                g = min((h * num_groups) // max(1, num_heads), num_groups - 1)
+                self.head_arities.append(self.prime_arities[g])
+        else:
+            self.prime_arities = None
+            self.p = int(p)
+            self.head_arities = [self.p] * num_heads
+
+        if levels is not None:
+            self.levels = int(levels)
+        else:
+            min_p = min(self.head_arities) if self.head_arities else self.p
+            self.levels = int(math.ceil(math.log(max(seq_len, 2), max(min_p, 2))))
+
+        self.head_levels = [
+            int(math.ceil(math.log(max(seq_len, 2), max(p_h, 2)))) if levels is None else self.levels
+            for p_h in self.head_arities
+        ]
+
+        in_dim = (2 * self.head_dim) if self.qk_mode else self.embed_dim
+        self.in_dim = in_dim
 
         # Per-head routing: shared backbone, per-head projection heads
-        self.backbone = nn.Linear(embed_dim, embed_dim)
+        self.backbone = nn.Linear(in_dim, in_dim)
         if self.tree_mode:
-            self.num_internal = (self.p ** self.levels - 1) // (self.p - 1)
-            self.route_heads = nn.Linear(embed_dim, num_heads * self.num_internal * self.p)
+            self.num_internal = (self.p ** self.levels - 1) // max(self.p - 1, 1)
+            self.out_per_head = self.num_internal * self.p
+            self.route_heads = nn.Linear(in_dim, num_heads * self.out_per_head)
         else:
-            self.route_heads = nn.Linear(embed_dim, num_heads * self.levels * self.p)
+            self.num_internal = 0
+            self.out_per_head = self.levels * self.p
+            self.route_heads = nn.Linear(in_dim, num_heads * self.out_per_head)
 
         with torch.no_grad():
             if init_mode == "random":
-                # Pure random projection: tests if pre-trained representation geometry alone partitions tokens
                 nn.init.normal_(self.backbone.weight, std=0.02)
                 nn.init.zeros_(self.backbone.bias)
                 nn.init.normal_(self.route_heads.weight, std=0.02)
@@ -89,38 +130,62 @@ class DynamicTopologyRouter(nn.Module):
                             b[idx] = 5.0
                     self.route_heads.bias.copy_(b)
 
+    def _project_logits(self, x: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
+        """
+        Projects input tensor x into per-head routing logits.
+        Supports:
+          - 3D input: (batch, seq_len, in_dim) -> returns logits (batch, seq_len, num_heads, ...)
+          - 4D input: (batch, num_heads, num_blocks, 2 * head_dim) -> returns logits (batch, num_blocks, num_heads, ...)
+        """
+        if x.dim() == 4:
+            batch_size, num_heads, seq_len, _ = x.shape
+            assert num_heads == self.num_heads, f"Expected {self.num_heads} heads, got {num_heads}"
+            h = F.gelu(self.backbone(x))  # (B, H, NB, in_dim)
+            w = self.route_heads.weight.view(self.num_heads, self.out_per_head, self.in_dim)
+            logits_bhso = torch.einsum("bhsi,hoi->bhso", h, w)
+            if self.route_heads.bias is not None:
+                b = self.route_heads.bias.view(1, self.num_heads, 1, self.out_per_head)
+                logits_bhso = logits_bhso + b
+            logits = logits_bhso.permute(0, 2, 1, 3).clamp(min=-50000.0, max=50000.0)
+            return logits, batch_size, seq_len
+        else:
+            batch_size, seq_len, _ = x.shape
+            h = F.gelu(self.backbone(x))  # (batch, seq_len, in_dim)
+            logits = self.route_heads(h).clamp(min=-50000.0, max=50000.0)
+            return logits, batch_size, seq_len
 
     def forward(
         self, x: torch.Tensor, tau_override: Optional[float] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        batch_size, seq_len, _ = x.shape
         tau = tau_override if tau_override is not None else self.tau
+        logits, batch_size, seq_len = self._project_logits(x)
 
-        h = F.gelu(self.backbone(x))  # (batch, seq_len, embed_dim)
-        logits = self.route_heads(h).clamp(min=-50000.0, max=50000.0)
-        
         if self.tree_mode:
             logits = logits.view(batch_size, seq_len, self.num_heads, self.num_internal, self.p)
             log_probs = F.log_softmax(logits.to(torch.float32), dim=-1)
-            
-            path_log_probs = torch.zeros((batch_size, seq_len, self.num_heads, 1), device=logits.device, dtype=torch.float32)
+
+            path_log_probs = torch.zeros(
+                (batch_size, seq_len, self.num_heads, 1), device=logits.device, dtype=torch.float32
+            )
             current_node_start = 0
-            
+
             for l in range(self.levels):
                 num_nodes_level = self.p ** l
                 level_log_probs = log_probs[:, :, :, current_node_start : current_node_start + num_nodes_level, :]
                 new_path_log_probs = path_log_probs.unsqueeze(-1) + level_log_probs
                 path_log_probs = new_path_log_probs.view(batch_size, seq_len, self.num_heads, num_nodes_level * self.p)
                 current_node_start += num_nodes_level
-                
+
             if self.training:
                 sampled_leaves = F.gumbel_softmax(path_log_probs, tau=tau, hard=self.hard, dim=-1)
             else:
                 indices = path_log_probs.argmax(dim=-1)
                 sampled_leaves = F.one_hot(indices, num_classes=self.p**self.levels).float()
-                
+
             if getattr(self, "leaf_to_assignments", None) is None:
-                mapping = torch.zeros((self.p**self.levels, self.levels, self.p), device=logits.device, dtype=torch.float32)
+                mapping = torch.zeros(
+                    (self.p**self.levels, self.levels, self.p), device=logits.device, dtype=torch.float32
+                )
                 for leaf_idx in range(self.p**self.levels):
                     val = leaf_idx
                     for l in range(self.levels - 1, -1, -1):
@@ -128,11 +193,11 @@ class DynamicTopologyRouter(nn.Module):
                         mapping[leaf_idx, l, choice] = 1.0
                         val = val // self.p
                 self.register_buffer("leaf_to_assignments", mapping, persistent=False)
-                
+
             assignments = torch.matmul(sampled_leaves, self.leaf_to_assignments.view(self.p**self.levels, -1))
             assignments = assignments.view(batch_size, seq_len, self.num_heads, self.levels, self.p).to(logits.dtype)
             assignments = assignments.permute(0, 2, 1, 3, 4)
-            
+
             num_paths = self.p ** self.levels
             f = (sampled_leaves.detach() > 0.5).float().mean(dim=1)
             P = path_log_probs.exp().mean(dim=1)
@@ -141,15 +206,44 @@ class DynamicTopologyRouter(nn.Module):
             logits = logits.view(batch_size, seq_len, self.num_heads, self.levels, self.p)
             logits = logits.permute(0, 2, 1, 3, 4)  # (batch, heads, seq_len, levels, p)
 
-            if self.training:
-                flat = logits.reshape(-1, self.p)
-                sampled = F.gumbel_softmax(flat.to(torch.float32), tau=tau, hard=self.hard, dim=-1).to(logits.dtype)
-                assignments = sampled.view_as(logits)
+            if self.prime_arities is not None and len(set(self.head_arities)) > 1:
+                # Multi-prime Adèlic routing per head group
+                assignments_list = []
+                lb_losses = []
+                num_groups = len(self.prime_arities)
+                for g, p_g in enumerate(self.prime_arities):
+                    h_start = (g * self.num_heads) // num_groups
+                    h_end = ((g + 1) * self.num_heads) // num_groups
+                    if h_start >= h_end:
+                        continue
+                    sub_logits = logits[:, h_start:h_end, :, :, :p_g]
+                    if self.training:
+                        flat = sub_logits.reshape(-1, p_g)
+                        sampled = F.gumbel_softmax(
+                            flat.to(torch.float32), tau=tau, hard=self.hard, dim=-1
+                        ).to(logits.dtype)
+                        sub_assign = sampled.view_as(sub_logits)
+                    else:
+                        indices = sub_logits.argmax(dim=-1)
+                        sub_assign = F.one_hot(indices, num_classes=p_g).to(logits.dtype)
+                    lb_losses.append(self.compute_load_balance_loss(sub_assign))
+                    if p_g < self.p:
+                        sub_assign = F.pad(sub_assign, (0, self.p - p_g), value=0.0)
+                    assignments_list.append(sub_assign)
+                assignments = torch.cat(assignments_list, dim=1)
+                load_balance_loss = sum(lb_losses) / max(len(lb_losses), 1)
             else:
-                indices = logits.argmax(dim=-1)
-                assignments = F.one_hot(indices, num_classes=self.p).float()
+                if self.training:
+                    flat = logits.reshape(-1, self.p)
+                    sampled = F.gumbel_softmax(
+                        flat.to(torch.float32), tau=tau, hard=self.hard, dim=-1
+                    ).to(logits.dtype)
+                    assignments = sampled.view_as(logits)
+                else:
+                    indices = logits.argmax(dim=-1)
+                    assignments = F.one_hot(indices, num_classes=self.p).float()
 
-            load_balance_loss = self.compute_load_balance_loss(assignments)
+                load_balance_loss = self.compute_load_balance_loss(assignments)
 
         return assignments, load_balance_loss
 
@@ -162,7 +256,7 @@ class DynamicTopologyRouter(nn.Module):
         the model from collapsing into highly correlated parallel choices.
         """
         B, H, S, L, p = assignments.shape
-        if L <= 8:
+        if L <= 8 and (p ** L) <= 4096:
             joint_P = assignments[..., 0, :]
             for l in range(1, L):
                 joint_P = joint_P.unsqueeze(-1) * assignments[..., l, :].unsqueeze(-2)
@@ -186,19 +280,73 @@ class DynamicTopologyRouter(nn.Module):
     ) -> float:
         """
         Cosine temperature annealing: soft routing → hard routing over training.
-
-        Args:
-            step: current training step
-            warmup_steps: total annealing steps
-            tau_start: initial temperature (soft)
-            tau_end: final temperature (hard)
-        Returns:
-            tau: current temperature value
         """
         if step >= warmup_steps:
             return tau_end
         progress = step / warmup_steps
         return tau_end + 0.5 * (tau_start - tau_end) * (1 + math.cos(math.pi * progress))
+
+
+class MultiPrimeTopologyRouter(DynamicTopologyRouter):
+    """
+    Convenience subclass of DynamicTopologyRouter configured for Multi-Prime
+    Adèlic GQA head groups (default prime_arities=(2, 3)).
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        seq_len: int,
+        num_heads: int = 2,
+        prime_arities: Sequence[int] = (2, 3),
+        tau: float = 1.0,
+        hard: bool = True,
+        init_mode: str = "collapse",
+        levels: Optional[int] = None,
+        tree_mode: bool = False,
+        qk_mode: bool = False,
+        head_dim: Optional[int] = None,
+    ):
+        super().__init__(
+            embed_dim=embed_dim,
+            seq_len=seq_len,
+            num_heads=num_heads,
+            p=max(prime_arities),
+            tau=tau,
+            hard=hard,
+            init_mode=init_mode,
+            levels=levels,
+            tree_mode=tree_mode,
+            qk_mode=qk_mode,
+            head_dim=head_dim,
+            prime_arities=prime_arities,
+        )
+
+
+def compute_expected_block_distance(assignments: torch.Tensor, p: int = 2) -> torch.Tensor:
+    """
+    Computes the differentiable expected p-adic (cophenetic) distance directly at
+    block granularity without expanding to N x N tokens.
+
+    Args:
+        assignments: (batch, heads, num_blocks, levels, p) or (batch, num_blocks, levels, p)
+        p: tree arity (unused in einsum since last dim of assignments encodes branches)
+
+    Returns:
+        expected_dist: (batch, heads, num_blocks, num_blocks) or (batch, num_blocks, num_blocks)
+    """
+    levels = assignments.shape[-2]
+    if assignments.dim() == 5:
+        M = torch.einsum("bhilp,bhjlp->bhijl", assignments, assignments)
+    elif assignments.dim() == 4:
+        M = torch.einsum("bilp,bjlp->bijl", assignments, assignments)
+    else:
+        raise ValueError(f"Expected 4D or 5D assignments tensor, got {assignments.dim()}D")
+
+    P_prefix = M.cummin(dim=-1)[0]
+    sum_P = P_prefix.sum(dim=-1)
+    return levels - sum_P
+
 
 
 # ============================================================================

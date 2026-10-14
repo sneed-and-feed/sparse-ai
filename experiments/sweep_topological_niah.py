@@ -177,19 +177,32 @@ def warmup_router_niah(
     print("[Router Warmup] Complete. Restoring evaluation mode.\n")
 
 
+def _resolve_layers(model):
+    if hasattr(model, "model") and hasattr(model.model, "language_model") and hasattr(model.model.language_model, "layers"):
+        return model.model.language_model.layers
+    if hasattr(model, "language_model") and hasattr(model.language_model, "layers"):
+        return model.language_model.layers
+    if hasattr(model, "model") and hasattr(model.model, "layers"):
+        return model.model.layers
+    if hasattr(model, "layers"):
+        return model.layers
+    return []
+
+
 def warmup_router_wikitext(
     model,
     tokenizer,
     steps: int = 80,
     lr: float = 2e-3,
     device: str = "cuda",
+    max_length: int = 384,
 ) -> None:
     """
     Wakes up the Dynamic Topology Router strictly via unsupervised next-token prediction
-    on natural language text with load-balancing loss.
+    on natural language text with load-balancing and optional KL-Lagrangian distillation loss.
     ABSOLUTELY ZERO synthetic needles, passcode formats, or query patterns.
     """
-    print(f"\n[Unsupervised Warmup] Training router on WikiText / natural language text ({steps} steps, LR={lr})...")
+    print(f"\n[Unsupervised Warmup] Training router on WikiText / natural language text ({steps} steps, max_length={max_length}, LR={lr})...")
     
     # Freeze backbone, train only routing parameters
     for name, p in model.named_parameters():
@@ -223,8 +236,23 @@ def warmup_router_wikitext(
         if ds is None:
             raise RuntimeError(err)
         raw_chunks = [t.strip() for t in ds["text"] if len(t.strip()) > 200]
-        corpus_texts = raw_chunks[:max(steps * 2, 200)]
-        print(f"[Data] Loaded {len(corpus_texts)} chunks from wikitext-2-raw-v1.")
+        if max_length > 512 and len(raw_chunks) > 4:
+            # Concatenate paragraphs into long-context documents (~max_length tokens)
+            target_chars = max_length * 5
+            packed, buf = [], []
+            buf_len = 0
+            for ch in raw_chunks:
+                buf.append(ch)
+                buf_len += len(ch)
+                if buf_len >= target_chars:
+                    packed.append("\n\n".join(buf))
+                    buf, buf_len = [], 0
+            if buf:
+                packed.append("\n\n".join(buf))
+            corpus_texts = packed[:max(steps * 2, 64)]
+        else:
+            corpus_texts = raw_chunks[:max(steps * 2, 200)]
+        print(f"[Data] Prepared {len(corpus_texts)} training documents from wikitext-2-raw-v1 (target max_length={max_length}).")
     except Exception as e:
         print("!" * 70)
         print(f"[WARNING] WikiText load FAILED ({e}).")
@@ -242,17 +270,20 @@ def warmup_router_wikitext(
         ]
 
     model.train()
+    layers = _resolve_layers(model)
     pbar = tqdm(range(steps), desc="Unsupervised WikiText Warmup")
     
     for step in pbar:
         txt = corpus_texts[step % len(corpus_texts)]
-        encoded = tokenizer(txt, return_tensors="pt", max_length=384, truncation=True, padding=False)
+        encoded = tokenizer(txt, return_tensors="pt", max_length=max_length, truncation=True, padding=False)
         input_ids = encoded["input_ids"].to(device)
         
-        if input_ids.shape[1] < 32:
-            input_ids = input_ids.repeat(1, (384 // input_ids.shape[1]) + 1)[:, :384]
+        if input_ids.shape[1] < min(32, max_length):
+            input_ids = input_ids.repeat(1, (max_length // input_ids.shape[1]) + 1)[:, :max_length]
             
         labels = input_ids.clone()
+        if hasattr(model, "_surgical_route_cache") and isinstance(model._surgical_route_cache, dict):
+            model._surgical_route_cache.clear()
         
         optimizer.zero_grad()
         outputs = model(input_ids=input_ids, labels=labels)
@@ -260,11 +291,14 @@ def warmup_router_wikitext(
         
         lb_loss = 0.0
         distill_loss = 0.0
-        for layer in model.model.layers:
-            if hasattr(layer.self_attn, 'current_penalty') and layer.self_attn.current_penalty is not None:
-                lb_loss += layer.self_attn.current_penalty
-            if hasattr(layer.self_attn, 'current_distill_loss') and layer.self_attn.current_distill_loss is not None:
-                distill_loss += layer.self_attn.current_distill_loss
+        for layer in layers:
+            attn = getattr(layer, "self_attn", None)
+            if attn is None:
+                continue
+            if hasattr(attn, 'current_penalty') and attn.current_penalty is not None:
+                lb_loss += attn.current_penalty
+            if hasattr(attn, 'current_distill_loss') and attn.current_distill_loss is not None:
+                distill_loss += attn.current_distill_loss
                 
         total_loss = loss + 0.02 * lb_loss + 1.0 * distill_loss
         total_loss.backward()

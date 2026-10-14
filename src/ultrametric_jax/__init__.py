@@ -23,6 +23,11 @@ from .model import (
     UltrametricTransformerBlock,
     UltrametricTransformer,
 )
+from .kernel import (
+    bruhat_tits_matmul,
+    build_block_lists_jax,
+    pallas_block_list_attention,
+)
 
 __all__ = [
     # Topology & Routing
@@ -39,4 +44,8 @@ __all__ = [
     # Model
     "UltrametricTransformerBlock",
     "UltrametricTransformer",
+    # Pallas Kernels
+    "bruhat_tits_matmul",
+    "build_block_lists_jax",
+    "pallas_block_list_attention",
 ]

@@ -1,5 +1,5 @@
 """
-Tests for ultrametric.block_list (block-list sparse attention).
+Tests for ultrametric.block_list (block-list sparse attention forward + backward).
 
 * Builder tests: pure PyTorch, run anywhere (CPU).
 * Kernel tests: need Triton plus either CUDA or the Triton CPU interpreter
@@ -15,9 +15,11 @@ import torch
 
 from ultrametric.block_list import (
     HAS_TRITON,
+    _build_block_lists_kernel,
     block_list_attention,
     block_mask_reference,
     build_block_lists,
+    build_transposed_block_lists,
     masked_reference_attention,
     token_mask_from_blocks,
 )
@@ -42,7 +44,7 @@ def tree_router(Z, H, NB, TD):
 
 
 # ----------------------------------------------------------------------------
-# Builder
+# Builder & Transposed Builder
 # ----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("p", [2, 3])
@@ -66,6 +68,64 @@ def test_builder_matches_pairwise_reference(p, is_causal, sink_block, local_bloc
                 c = int(bl.counts[z, h, i])
                 expected = torch.nonzero(ref[z, h, i]).flatten().to(torch.int32)
                 assert torch.equal(bl.lists[z, h, i, :c], expected), (z, h, i)
+
+
+@pytest.mark.parametrize("is_causal", [False, True])
+@pytest.mark.parametrize("sink_block,local_blocks", [(False, 0), (True, 0), (False, 1), (True, 2)])
+def test_transposed_block_lists_matches_reference(is_causal, sink_block, local_blocks):
+    Z, H, NB, TD = 2, 3, 7, 4
+    router = random_router(Z, H, NB, TD, 2, seed=42)
+    depth = torch.tensor([0, 2, 4])
+    kw = dict(is_causal=is_causal, sink_block=sink_block, local_blocks=local_blocks)
+
+    bl = build_block_lists(router, depth, **kw)
+    tbl = build_transposed_block_lists(bl, num_key_blocks=NB)
+    ref_t = block_mask_reference(router, depth, **kw).transpose(-2, -1)
+
+    assert tbl.lists.dtype == torch.int32 and tbl.counts.dtype == torch.int32
+    assert torch.equal(tbl.counts, ref_t.sum(-1).to(torch.int32))
+    assert tbl.max_count == int(ref_t.sum(-1).max())
+    for z in range(Z):
+        for h in range(H):
+            for kb in range(NB):
+                c = int(tbl.counts[z, h, kb])
+                expected = torch.nonzero(ref_t[z, h, kb]).flatten().to(torch.int32)
+                assert torch.equal(tbl.lists[z, h, kb, :c], expected), (z, h, kb)
+
+
+@pytest.mark.skipif(not CAN_RUN_KERNEL, reason="needs Triton + CUDA, or TRITON_INTERPRET=1")
+@pytest.mark.parametrize("is_causal", [False, True])
+@pytest.mark.parametrize("sink_block,local_blocks", [(False, 0), (True, 1)])
+def test_triton_build_block_lists_kernel_parity(is_causal, sink_block, local_blocks):
+    Z, H, NB, TD = 2, 3, 9, 4
+    router = random_router(Z, H, NB, TD, 3, seed=13).to(DEVICE)
+    depth = torch.tensor([0, 2, 4], device=DEVICE)
+
+    ref_bl = build_block_lists(router, depth, is_causal=is_causal,
+                               sink_block=sink_block, local_blocks=local_blocks)
+
+    # Directly invoke _build_block_lists_kernel on mixed-radix codes to verify bit-exactness
+    levels = torch.arange(TD, device=DEVICE)
+    keep = levels.view(1, 1, 1, TD) < depth.view(1, H, 1, 1)
+    powers = torch.pow(3, levels.to(torch.int64))
+    code = (router.to(torch.int64) * keep * powers).sum(-1).contiguous()
+
+    lists_full = torch.zeros((Z, H, NB, NB), dtype=torch.int32, device=DEVICE)
+    counts = torch.empty((Z, H, NB), dtype=torch.int32, device=DEVICE)
+    block_nb = 1 << (NB - 1).bit_length()
+    _build_block_lists_kernel[(NB, Z * H)](
+        code, lists_full, counts,
+        *code.stride(), *lists_full.stride(), *counts.stride(),
+        H, NB,
+        IS_CAUSAL=is_causal, SINK_BLOCK=sink_block, LOCAL_BLOCKS=local_blocks,
+        BLOCK_NB=block_nb,
+    )
+    assert torch.equal(counts, ref_bl.counts)
+    for z in range(Z):
+        for h in range(H):
+            for qb in range(NB):
+                c = int(counts[z, h, qb])
+                assert torch.equal(lists_full[z, h, qb, :c], ref_bl.lists[z, h, qb, :c])
 
 
 def test_diagonal_always_present():
@@ -124,7 +184,7 @@ def test_sync_free_builder_matches(p, is_causal, depth):
 
 
 # ----------------------------------------------------------------------------
-# Kernel vs. block-masked fp32 reference
+# Kernel vs. block-masked fp32 reference (Forward)
 # ----------------------------------------------------------------------------
 
 KERNEL_CASES = [
@@ -191,6 +251,104 @@ def test_autotuned_kernel_cuda_head_dims(head_dim):
         ref = masked_reference_attention(q, k, v, token_mask_from_blocks(bm, rb, N, True))
         tol = 2e-3 if dtype == torch.float16 else 1.6e-2
         assert (out.float() - ref.float()).abs().max().item() < tol
+
+
+# ----------------------------------------------------------------------------
+# Backward pass: dQ, dK, dV, and d_soft_block_bias (STE router gradients)
+# ----------------------------------------------------------------------------
+
+@pytest.mark.skipif(not CAN_RUN_KERNEL, reason="needs Triton + CUDA, or TRITON_INTERPRET=1")
+@pytest.mark.parametrize("N,rb,bm,bn,depth,is_causal,sink,local", [
+    (128, 64, 32, 32, 1, False, False, 0),
+    (100, 32, 16, 16, 2, True, True, 0),
+    (96, 32, 32, 16, 1, False, False, 1),
+])
+def test_backward_dq_dk_dv_matches_autograd_reference(N, rb, bm, bn, depth, is_causal, sink, local):
+    torch.manual_seed(42)
+    Z, H, D = 1, 2, 16
+    dtype = torch.float16 if DEVICE == "cuda" else torch.float32
+    q0 = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+    k0 = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+    v0 = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+    do = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+
+    NB = math.ceil(N / rb)
+    router = random_router(Z, H, NB, 3, 2, seed=N).to(DEVICE)
+    kw = dict(is_causal=is_causal, sink_block=sink, local_blocks=local)
+    bl = build_block_lists(router, depth, **kw)
+
+    q = q0.clone().requires_grad_(True)
+    k = k0.clone().requires_grad_(True)
+    v = v0.clone().requires_grad_(True)
+    out = block_list_attention(q, k, v, bl, route_block=rb, is_causal=is_causal,
+                               block_m=bm, block_n=bn)
+    out.backward(do)
+
+    q_ref = q0.clone().float().requires_grad_(True)
+    k_ref = k0.clone().float().requires_grad_(True)
+    v_ref = v0.clone().float().requires_grad_(True)
+    mask = token_mask_from_blocks(block_mask_reference(router, depth, **kw), rb, N, is_causal)
+    out_ref = masked_reference_attention(q_ref, k_ref, v_ref, mask)
+    out_ref.backward(do.float())
+
+    tol = 5e-3 if dtype == torch.float16 else 1e-4
+    assert (q.grad.float() - q_ref.grad).abs().max().item() < tol
+    assert (k.grad.float() - k_ref.grad).abs().max().item() < tol
+    assert (v.grad.float() - v_ref.grad).abs().max().item() < tol
+
+
+@pytest.mark.skipif(not CAN_RUN_KERNEL, reason="needs Triton + CUDA, or TRITON_INTERPRET=1")
+@pytest.mark.parametrize("is_causal", [False, True])
+def test_backward_soft_block_bias_ste_matches_reference(is_causal):
+    torch.manual_seed(99)
+    Z, H, N, D, rb, bm, bn = 1, 2, 96, 16, 32, 16, 16
+    dtype = torch.float16 if DEVICE == "cuda" else torch.float32
+    q0 = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+    k0 = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+    v0 = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+    do = torch.randn(Z, H, N, D, device=DEVICE, dtype=dtype)
+
+    NB = math.ceil(N / rb)
+    router = random_router(Z, H, NB, 3, 2, seed=17).to(DEVICE)
+    bl = build_block_lists(router, 1, is_causal=is_causal, sink_block=True)
+
+    # Zero-valued STE block bias: forward is unchanged, backward gives exact dL/d(bias)
+    raw_logits = torch.randn(Z, H, NB, bl.max_count, device=DEVICE, dtype=torch.float32, requires_grad=True)
+    ste_bias = raw_logits - raw_logits.detach()
+    ste_bias.retain_grad()
+
+    q = q0.clone().requires_grad_(True)
+    k = k0.clone().requires_grad_(True)
+    v = v0.clone().requires_grad_(True)
+    out = block_list_attention(
+        q, k, v, bl, route_block=rb, is_causal=is_causal,
+        block_m=bm, block_n=bn, soft_block_bias=ste_bias,
+    )
+    out.backward(do)
+
+    # Reference: expand block bias to token level and differentiate through PyTorch softmax
+    raw_ref = raw_logits.detach().clone().requires_grad_(True)
+    ste_ref = raw_ref - raw_ref.detach()
+    # Map (z, h, qb, t) -> (z, h, qb, kb)
+    block_bias_full = torch.zeros(Z, H, NB, NB, device=DEVICE, dtype=torch.float32)
+    for z in range(Z):
+        for h in range(H):
+            for qb in range(NB):
+                c = int(bl.counts[z, h, qb])
+                for t in range(c):
+                    kb = int(bl.lists[z, h, qb, t])
+                    block_bias_full[z, h, qb, kb] = ste_ref[z, h, qb, t]
+
+    token_bias = block_bias_full.repeat_interleave(rb, dim=-2).repeat_interleave(rb, dim=-1)[..., :N, :N]
+    mask = token_mask_from_blocks(block_mask_reference(router, 1, is_causal=is_causal, sink_block=True), rb, N, is_causal)
+    scale = 1.0 / math.sqrt(D)
+    scores = torch.matmul(q0.float(), k0.float().transpose(-2, -1)) * scale + token_bias
+    scores = scores.masked_fill(~mask, float("-inf"))
+    out_ref = torch.matmul(torch.softmax(scores, dim=-1), v0.float())
+    out_ref.backward(do.float())
+
+    tol = 5e-3 if dtype == torch.float16 else 1e-4
+    assert (raw_logits.grad - raw_ref.grad).abs().max().item() < tol
 
 
 # ----------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """
-Block-list sparse attention (forward) for routed / ultrametric block sparsity
-=============================================================================
+Block-list sparse attention (forward + backward) for routed / ultrametric block sparsity
+========================================================================================
 
 Problem with the existing kernels
 ---------------------------------
@@ -17,20 +17,25 @@ This module
 -----------
 1. ``build_block_lists`` turns per-block routing vectors into, for every
    (batch, head, query route-block), an ascending list of active key route-blocks
-   plus its length. Pure PyTorch, vectorized, built once per forward and reusable.
-2. ``block_list_attention`` loops over **only that row's own list length**
+   plus its length. Uses a fused Triton kernel on CUDA when NB <= 1024 (avoiding
+   materializing the O(Z*H*NB^2) boolean mask in HBM), with a vectorized PyTorch
+   fallback.
+2. ``build_transposed_block_lists`` inverts a ``BlockLists`` object so each key
+   route-block maps to the ascending list of query route-blocks attending to it
+   (used by the dK/dV backward kernel).
+3. ``block_list_attention`` loops over **only that row's own list length**
    (runtime loop bound), so cost scales with the number of active blocks per row.
    Each route block (default 128 tokens) is tiled into BLOCK_N sub-tiles;
    tile sizes are autotuned on CUDA. Causality and the sequence tail are masked at
    token granularity; an optional sink block and local block band mirror the
    LLaMA-surgery inference mask.
+4. Full sparse autograd support (``_block_list_bwd_dq_kernel`` and
+   ``_block_list_bwd_dkdv_kernel``) plus optional ``soft_block_bias`` gradient
+   for straight-through estimator (STE) router training without materializing an
+   O(N^2) dense attention matrix.
 
 Matching rule (same as the existing kernels): query block i attends to key block j
 iff their routing vectors agree on the first ``req_depth[h]`` levels.
-
-Forward only. Testing: ``tests/test_block_list.py`` checks the list builder against
-an independent pairwise construction, and the kernel against a block-masked fp32
-reference (on CUDA, or on CPU via ``TRITON_INTERPRET=1``).
 """
 
 from __future__ import annotations
@@ -57,6 +62,7 @@ __all__ = [
     "HAS_TRITON",
     "BlockLists",
     "build_block_lists",
+    "build_transposed_block_lists",
     "block_list_attention",
     "routed_block_attention",
     "block_mask_reference",
@@ -66,16 +72,16 @@ __all__ = [
 
 
 # ============================================================================
-# Block-list construction (pure PyTorch)
+# Block-list construction (Triton fused kernel + pure PyTorch fallback)
 # ============================================================================
 
 class BlockLists(NamedTuple):
-    """Active key route-blocks per query route-block.
+    """Active key route-blocks per query route-block (or transposed: query blocks per key block).
 
-    lists:     (Z, H, NB, max_count) int32. Row (z, h, i) holds the active key
-               blocks for query block i in ascending order; entries at positions
+    lists:     (Z, H, NB, max_count) int32. Row (z, h, i) holds the active partner
+               blocks for block i in ascending order; entries at positions
                >= counts[z, h, i] are padding and are never read by the kernel.
-    counts:    (Z, H, NB) int32, number of active key blocks per row.
+    counts:    (Z, H, NB) int32, number of active blocks per row.
     max_count: int, max over counts (row stride of ``lists``).
     """
 
@@ -110,6 +116,55 @@ def _apply_structural_masks(match: torch.Tensor, *, is_causal: bool, sink_block:
     if is_causal:
         match = match & (idx.view(-1, 1) >= idx.view(1, -1))
     return match
+
+
+def _next_pow2(n: int) -> int:
+    return 1 if n <= 1 else 1 << (n - 1).bit_length()
+
+
+if HAS_TRITON:
+
+    @triton.jit
+    def _build_block_lists_kernel(
+        Codes, Lists, Counts,
+        stride_cz, stride_ch, stride_cb,
+        stride_lz, stride_lh, stride_lb, stride_lk,
+        stride_cntz, stride_cnth, stride_cntb,
+        H, NB,
+        IS_CAUSAL: tl.constexpr, SINK_BLOCK: tl.constexpr, LOCAL_BLOCKS: tl.constexpr,
+        BLOCK_NB: tl.constexpr,
+    ):
+        qb = tl.program_id(0)
+        off_hz = tl.program_id(1)
+        off_z = off_hz // H
+        off_h = off_hz % H
+
+        c_base = Codes + off_z.to(tl.int64) * stride_cz + off_h.to(tl.int64) * stride_ch
+        q_code = tl.load(c_base + qb * stride_cb)
+
+        offs_kb = tl.arange(0, BLOCK_NB)
+        kb_valid = offs_kb < NB
+        k_codes = tl.load(c_base + offs_kb * stride_cb, mask=kb_valid, other=-1)
+
+        match = (k_codes == q_code) & kb_valid
+        if LOCAL_BLOCKS > 0:
+            diff = tl.abs(qb - offs_kb)
+            match = match | ((diff <= LOCAL_BLOCKS) & kb_valid)
+        if SINK_BLOCK:
+            match = match | ((offs_kb == 0) & kb_valid)
+        if IS_CAUSAL:
+            match = match & (qb >= offs_kb)
+
+        match_int = match.to(tl.int32)
+        count = tl.sum(match_int, axis=0)
+        tl.store(
+            Counts + off_z.to(tl.int64) * stride_cntz + off_h.to(tl.int64) * stride_cnth + qb * stride_cntb,
+            count,
+        )
+
+        pos = tl.cumsum(match_int, axis=0) - 1
+        l_row = Lists + off_z.to(tl.int64) * stride_lz + off_h.to(tl.int64) * stride_lh + qb * stride_lb
+        tl.store(l_row + pos * stride_lk, offs_kb, mask=match)
 
 
 @torch.no_grad()
@@ -166,11 +221,37 @@ def build_block_lists(
     else:
         keep = levels.view(1, 1, 1, TD) < depth.view(1, H, 1, 1)
 
-    if TD * math.log2(base) < 62:
+    can_encode_code = TD * math.log2(base) < 62
+    if can_encode_code:
         # Encode each block's first-d levels as a mixed-radix integer; blocks match
         # iff their codes are equal. O(Z*H*NB^2) memory instead of O(Z*H*NB^2*TD).
         powers = torch.pow(base, levels.to(torch.int64))
-        code = (r * keep * powers).sum(-1)                      # (Z, H, NB)
+        code = (r * keep * powers).sum(-1).contiguous()         # (Z, H, NB) int64
+
+        if router_indices.is_cuda and HAS_TRITON and not _INTERPRET and 0 < NB <= 1024:
+            lists_full = torch.zeros((Z, H, NB, NB), dtype=torch.int32, device=device)
+            counts = torch.empty((Z, H, NB), dtype=torch.int32, device=device)
+            block_nb = _next_pow2(NB)
+            grid = (NB, Z * H)
+            _build_block_lists_kernel[grid](
+                code, lists_full, counts,
+                *code.stride(),
+                *lists_full.stride(),
+                *counts.stride(),
+                H, NB,
+                IS_CAUSAL=bool(is_causal),
+                SINK_BLOCK=bool(sink_block),
+                LOCAL_BLOCKS=int(local_blocks),
+                BLOCK_NB=block_nb,
+            )
+            if sync_free:
+                max_count = NB
+                lists = lists_full
+            else:
+                max_count = int(counts.max()) if counts.numel() else 0
+                lists = lists_full[..., :max_count].contiguous()
+            return BlockLists(lists, counts, max_count)
+
         match = code.unsqueeze(-1) == code.unsqueeze(-2)        # (Z, H, NB, NB)
     else:
         eq = (r.unsqueeze(3) == r.unsqueeze(2)) | ~keep.unsqueeze(2)
@@ -195,6 +276,55 @@ def build_block_lists(
     lists = lists[..., :max_count].contiguous()
 
     return BlockLists(lists, counts.contiguous(), max_count)
+
+
+@torch.no_grad()
+def build_transposed_block_lists(
+    block_lists: BlockLists,
+    num_key_blocks: Optional[int] = None,
+) -> BlockLists:
+    """Invert active key-block lists per query block into active query-block lists per key block.
+
+    Args:
+        block_lists: ``BlockLists(lists, counts, max_count)`` where ``lists`` has
+            shape ``(Z, H, NB_Q, max_count)`` and ``counts`` has shape ``(Z, H, NB_Q)``.
+        num_key_blocks: total number of key route-blocks ``NB_K`` (defaults to ``NB_Q``).
+
+    Returns:
+        ``BlockLists(k_lists, q_counts, max_q_count)`` where row ``(z, h, kb)``
+        of ``k_lists`` holds the ascending query route-blocks ``qb`` that attend to ``kb``.
+    """
+    lists, counts, max_count = block_lists
+    Z, H, NB_Q = counts.shape
+    NB_K = num_key_blocks if num_key_blocks is not None else NB_Q
+    device = lists.device
+
+    if NB_Q == 0 or NB_K == 0 or max_count == 0:
+        q_counts = torch.zeros((Z, H, NB_K), dtype=torch.int32, device=device)
+        k_lists = torch.zeros((Z, H, NB_K, 0), dtype=torch.int32, device=device)
+        return BlockLists(k_lists, q_counts, 0)
+
+    t_idx = torch.arange(max_count, device=device).view(1, 1, 1, max_count)
+    valid = t_idx < counts.unsqueeze(-1)  # (Z, H, NB_Q, max_count)
+
+    # Scatter valid (qb, kb) pairs into a (Z, H, NB_Q, NB_K + 1) boolean table
+    # (slot NB_K is a dump bucket for invalid entries), then transpose to (Z, H, NB_K, NB_Q).
+    safe_kb = torch.where(valid, lists.to(torch.int64), torch.full_like(lists, NB_K, dtype=torch.int64))
+    match_qk = torch.zeros((Z, H, NB_Q, NB_K + 1), dtype=torch.bool, device=device)
+    match_qk.scatter_(-1, safe_kb, valid)
+    match_kq = match_qk[..., :NB_K].transpose(-2, -1).contiguous()  # (Z, H, NB_K, NB_Q)
+
+    q_counts = match_kq.sum(-1, dtype=torch.int32)
+    max_q_count = int(q_counts.max()) if q_counts.numel() else 0
+
+    pos = torch.cumsum(match_kq, dim=-1, dtype=torch.int64) - 1
+    pos = torch.where(match_kq, pos, torch.full_like(pos, max_q_count))
+    src = torch.arange(NB_Q, dtype=torch.int32, device=device).expand(Z, H, NB_K, NB_Q)
+    k_lists = torch.zeros((Z, H, NB_K, max_q_count + 1), dtype=torch.int32, device=device)
+    k_lists.scatter_(-1, pos, src)
+    k_lists = k_lists[..., :max_q_count].contiguous()
+
+    return BlockLists(k_lists, q_counts.contiguous(), max_q_count)
 
 
 # ============================================================================
@@ -249,25 +379,22 @@ def masked_reference_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
 
 
 # ============================================================================
-# Triton kernel
+# Triton kernels (forward + backward)
 # ============================================================================
-
-def _next_pow2(n: int) -> int:
-    return 1 if n <= 1 else 1 << (n - 1).bit_length()
-
 
 if HAS_TRITON:
 
     @triton.jit
     def _block_list_fwd_kernel(
-        Q, K, V, Out, Lse, Lists, Counts, sm_scale,
+        Q, K, V, Out, Lse, Lists, Counts, SoftBias, sm_scale,
         stride_qz, stride_qh, stride_qm, stride_qd,
         stride_kz, stride_kh, stride_kn, stride_kd,
         stride_vz, stride_vh, stride_vn, stride_vd,
         stride_oz, stride_oh, stride_om, stride_od,
+        stride_sbz, stride_sbh, stride_sbm, stride_sbn,
         H, N_CTX, NUM_RB, MAX_COUNT, COUNT_BUCKET,
         HEAD_DIM: tl.constexpr, ROUTE_BLOCK: tl.constexpr, IS_CAUSAL: tl.constexpr,
-        STORE_LSE: tl.constexpr,
+        STORE_LSE: tl.constexpr, HAS_SOFT_BIAS: tl.constexpr,
         BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
     ):
         # COUNT_BUCKET is unused in the body; it is an autotune key (next pow2 of
@@ -291,17 +418,24 @@ if HAS_TRITON:
                     mask=m_valid[:, None], other=0.0)
 
         # BLOCK_M divides ROUTE_BLOCK, so this query tile lies in one route block.
-        row = off_hz.to(tl.int64) * NUM_RB + (start_m * BLOCK_M) // ROUTE_BLOCK
+        qb = (start_m * BLOCK_M) // ROUTE_BLOCK
+        row = off_hz.to(tl.int64) * NUM_RB + qb
         count = tl.load(Counts + row)
         list_ptr = Lists + row * MAX_COUNT
+        if HAS_SOFT_BIAS:
+            sb_ptr = (SoftBias + off_z.to(tl.int64) * stride_sbz
+                      + off_h.to(tl.int64) * stride_sbh + qb * stride_sbm)
 
         m_i = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
         l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
         acc = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
-        qk_scale = sm_scale * 1.4426950408889634  # log2(e): use exp2
+        log2e = 1.4426950408889634
+        qk_scale = sm_scale * log2e  # log2(e): use exp2
 
         for t in range(0, count):  # runtime bound: only this row's active blocks
             kb = tl.load(list_ptr + t)
+            if HAS_SOFT_BIAS:
+                b_val = tl.load(sb_ptr + t * stride_sbn).to(tl.float32) * log2e
             for s in tl.static_range(ROUTE_BLOCK // BLOCK_N):
                 cols = kb * ROUTE_BLOCK + s * BLOCK_N + offs_n
                 n_valid = cols < N_CTX
@@ -310,6 +444,8 @@ if HAS_TRITON:
                 v = tl.load(v_base + cols[:, None] * stride_vn + offs_d[None, :] * stride_vd,
                             mask=n_valid[:, None], other=0.0)
                 qk = tl.dot(q, k) * qk_scale
+                if HAS_SOFT_BIAS:
+                    qk = qk + b_val
                 keep = n_valid[None, :]
                 if IS_CAUSAL:
                     keep = keep & (offs_m[:, None] >= cols[None, :])
@@ -324,8 +460,8 @@ if HAS_TRITON:
                 acc = acc * alpha[:, None] + tl.dot(p.to(v.dtype), v)
                 m_i = m_new
 
-        l_i = tl.where(l_i == 0.0, 1.0, l_i)
-        acc = acc / l_i[:, None]
+        l_i_safe = tl.where(l_i == 0.0, 1.0, l_i)
+        acc = acc / l_i_safe[:, None]
         tl.store(o_base + offs_m[:, None] * stride_om + offs_d[None, :] * stride_od,
                  acc.to(Out.dtype.element_ty), mask=m_valid[:, None])
         if STORE_LSE:
@@ -355,6 +491,435 @@ if HAS_TRITON:
         prune_configs_by={"early_config_prune": _prune_configs},
     )(_block_list_fwd_kernel)
 
+    @triton.jit
+    def _block_list_bwd_dq_kernel(
+        Q, K, V, dO, dQ, Lse, Delta, Lists, Counts, SoftBias, dSoftBias, sm_scale,
+        stride_qz, stride_qh, stride_qm, stride_qd,
+        stride_kz, stride_kh, stride_kn, stride_kd,
+        stride_vz, stride_vh, stride_vn, stride_vd,
+        stride_doz, stride_doh, stride_dom, stride_dod,
+        stride_dqz, stride_dqh, stride_dqm, stride_dqd,
+        stride_sbz, stride_sbh, stride_sbm, stride_sbn,
+        stride_dsbz, stride_dsbh, stride_dsbm, stride_dsbn,
+        H, N_CTX, NUM_RB, MAX_COUNT,
+        HEAD_DIM: tl.constexpr, ROUTE_BLOCK: tl.constexpr, IS_CAUSAL: tl.constexpr,
+        HAS_SOFT_BIAS: tl.constexpr,
+        BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+    ):
+        start_m = tl.program_id(0)
+        off_hz = tl.program_id(1)
+        off_z = off_hz // H
+        off_h = off_hz % H
+
+        q_base = Q + off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
+        k_base = K + off_z.to(tl.int64) * stride_kz + off_h.to(tl.int64) * stride_kh
+        v_base = V + off_z.to(tl.int64) * stride_vz + off_h.to(tl.int64) * stride_vh
+        do_base = dO + off_z.to(tl.int64) * stride_doz + off_h.to(tl.int64) * stride_doh
+        dq_base = dQ + off_z.to(tl.int64) * stride_dqz + off_h.to(tl.int64) * stride_dqh
+
+        offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+        offs_n = tl.arange(0, BLOCK_N)
+        offs_d = tl.arange(0, HEAD_DIM)
+        m_valid = offs_m < N_CTX
+
+        q = tl.load(q_base + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qd,
+                    mask=m_valid[:, None], other=0.0)
+        do = tl.load(do_base + offs_m[:, None] * stride_dom + offs_d[None, :] * stride_dod,
+                     mask=m_valid[:, None], other=0.0)
+
+        lse = tl.load(Lse + off_hz.to(tl.int64) * N_CTX + offs_m, mask=m_valid, other=float("-inf"))
+        delta = tl.load(Delta + off_hz.to(tl.int64) * N_CTX + offs_m, mask=m_valid, other=0.0)
+
+        log2e = 1.4426950408889634
+        qk_scale = sm_scale * log2e
+        # Safe lse in log2 units so exp2(qk - lse_log2) does not produce NaN when lse == -inf
+        lse_safe = tl.where(lse == float("-inf"), 0.0, lse * log2e)
+
+        qb = (start_m * BLOCK_M) // ROUTE_BLOCK
+        row = off_hz.to(tl.int64) * NUM_RB + qb
+        count = tl.load(Counts + row)
+        list_ptr = Lists + row * MAX_COUNT
+
+        if HAS_SOFT_BIAS:
+            sb_ptr = (SoftBias + off_z.to(tl.int64) * stride_sbz
+                      + off_h.to(tl.int64) * stride_sbh + qb * stride_sbm)
+            dsb_ptr = (dSoftBias + off_z.to(tl.int64) * stride_dsbz
+                       + off_h.to(tl.int64) * stride_dsbh + qb * stride_dsbm)
+
+        dq = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
+
+        for t in range(0, count):
+            kb = tl.load(list_ptr + t)
+            if HAS_SOFT_BIAS:
+                b_val = tl.load(sb_ptr + t * stride_sbn).to(tl.float32) * log2e
+                db_acc = tl.zeros([], dtype=tl.float32)
+            for s in tl.static_range(ROUTE_BLOCK // BLOCK_N):
+                cols = kb * ROUTE_BLOCK + s * BLOCK_N + offs_n
+                n_valid = cols < N_CTX
+                k_t = tl.load(k_base + cols[None, :] * stride_kn + offs_d[:, None] * stride_kd,
+                              mask=n_valid[None, :], other=0.0)
+                v_t = tl.load(v_base + cols[None, :] * stride_vn + offs_d[:, None] * stride_vd,
+                              mask=n_valid[None, :], other=0.0)
+                qk = tl.dot(q, k_t) * qk_scale
+                if HAS_SOFT_BIAS:
+                    qk = qk + b_val
+                keep = m_valid[:, None] & n_valid[None, :]
+                if IS_CAUSAL:
+                    keep = keep & (offs_m[:, None] >= cols[None, :])
+                qk = tl.where(keep, qk, float("-inf"))
+
+                p = tl.where(keep, tl.math.exp2(qk - lse_safe[:, None]), 0.0)
+                dp = tl.dot(do, v_t)
+                ds_unscaled = tl.where(keep, p * (dp - delta[:, None]), 0.0)
+                if HAS_SOFT_BIAS:
+                    db_acc += tl.sum(ds_unscaled)
+                ds = ds_unscaled * sm_scale
+
+                k = tl.trans(k_t)  # (BLOCK_N, HEAD_DIM)
+                dq += tl.dot(ds.to(k.dtype), k)
+            if HAS_SOFT_BIAS:
+                tl.atomic_add(dsb_ptr + t * stride_dsbn, db_acc)
+
+        tl.store(dq_base + offs_m[:, None] * stride_dqm + offs_d[None, :] * stride_dqd,
+                 dq.to(dQ.dtype.element_ty), mask=m_valid[:, None])
+
+    @triton.jit
+    def _block_list_bwd_dkdv_kernel(
+        Q, K, V, dO, dK, dV, Lse, Delta, KeyLists, KeyCounts, SoftBias, sm_scale,
+        stride_qz, stride_qh, stride_qm, stride_qd,
+        stride_kz, stride_kh, stride_kn, stride_kd,
+        stride_vz, stride_vh, stride_vn, stride_vd,
+        stride_doz, stride_doh, stride_dom, stride_dod,
+        stride_dkz, stride_dkh, stride_dkn, stride_dkd,
+        stride_dvz, stride_dvh, stride_dvn, stride_dvd,
+        stride_sbz, stride_sbh, stride_sbm, stride_sbn,
+        FwdLists, FwdCounts, FWD_MAX_COUNT,
+        H, N_CTX, NUM_RB, MAX_Q_COUNT,
+        HEAD_DIM: tl.constexpr, ROUTE_BLOCK: tl.constexpr, IS_CAUSAL: tl.constexpr,
+        HAS_SOFT_BIAS: tl.constexpr,
+        BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+    ):
+        start_n = tl.program_id(0)
+        off_hz = tl.program_id(1)
+        off_z = off_hz // H
+        off_h = off_hz % H
+
+        q_base = Q + off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
+        k_base = K + off_z.to(tl.int64) * stride_kz + off_h.to(tl.int64) * stride_kh
+        v_base = V + off_z.to(tl.int64) * stride_vz + off_h.to(tl.int64) * stride_vh
+        do_base = dO + off_z.to(tl.int64) * stride_doz + off_h.to(tl.int64) * stride_doh
+        dk_base = dK + off_z.to(tl.int64) * stride_dkz + off_h.to(tl.int64) * stride_dkh
+        dv_base = dV + off_z.to(tl.int64) * stride_dvz + off_h.to(tl.int64) * stride_dvh
+
+        offs_n = start_n * BLOCK_N + tl.arange(0, BLOCK_N)
+        offs_m_sub = tl.arange(0, BLOCK_M)
+        offs_d = tl.arange(0, HEAD_DIM)
+        n_valid = offs_n < N_CTX
+
+        k = tl.load(k_base + offs_n[:, None] * stride_kn + offs_d[None, :] * stride_kd,
+                    mask=n_valid[:, None], other=0.0)
+        v = tl.load(v_base + offs_n[:, None] * stride_vn + offs_d[None, :] * stride_vd,
+                    mask=n_valid[:, None], other=0.0)
+        k_t = tl.trans(k)  # (HEAD_DIM, BLOCK_N)
+        v_t = tl.trans(v)  # (HEAD_DIM, BLOCK_N)
+
+        kb = (start_n * BLOCK_N) // ROUTE_BLOCK
+        k_row = off_hz.to(tl.int64) * NUM_RB + kb
+        q_count = tl.load(KeyCounts + k_row)
+        k_list_ptr = KeyLists + k_row * MAX_Q_COUNT
+
+        log2e = 1.4426950408889634
+        qk_scale = sm_scale * log2e
+
+        dk = tl.zeros([BLOCK_N, HEAD_DIM], dtype=tl.float32)
+        dv = tl.zeros([BLOCK_N, HEAD_DIM], dtype=tl.float32)
+
+        for t in range(0, q_count):
+            qb = tl.load(k_list_ptr + t)
+            b_val = 0.0
+            if HAS_SOFT_BIAS:
+                # Find index of kb in qb's forward list to read SoftBias[z, h, qb, idx]
+                q_row = off_hz.to(tl.int64) * NUM_RB + qb
+                f_count = tl.load(FwdCounts + q_row)
+                f_list_ptr = FwdLists + q_row * FWD_MAX_COUNT
+                sb_row_ptr = (SoftBias + off_z.to(tl.int64) * stride_sbz
+                              + off_h.to(tl.int64) * stride_sbh + qb * stride_sbm)
+                for ft in range(0, f_count):
+                    f_kb = tl.load(f_list_ptr + ft)
+                    if f_kb == kb:
+                        b_val = tl.load(sb_row_ptr + ft * stride_sbn).to(tl.float32) * log2e
+
+            for s in tl.static_range(ROUTE_BLOCK // BLOCK_M):
+                rows = qb * ROUTE_BLOCK + s * BLOCK_M + offs_m_sub
+                m_valid = rows < N_CTX
+                q = tl.load(q_base + rows[:, None] * stride_qm + offs_d[None, :] * stride_qd,
+                            mask=m_valid[:, None], other=0.0)
+                do = tl.load(do_base + rows[:, None] * stride_dom + offs_d[None, :] * stride_dod,
+                             mask=m_valid[:, None], other=0.0)
+                lse = tl.load(Lse + off_hz.to(tl.int64) * N_CTX + rows, mask=m_valid, other=float("-inf"))
+                delta = tl.load(Delta + off_hz.to(tl.int64) * N_CTX + rows, mask=m_valid, other=0.0)
+                lse_safe = tl.where(lse == float("-inf"), 0.0, lse * log2e)
+
+                qk = tl.dot(q, k_t) * qk_scale
+                if HAS_SOFT_BIAS:
+                    qk = qk + b_val
+                keep = m_valid[:, None] & n_valid[None, :]
+                if IS_CAUSAL:
+                    keep = keep & (rows[:, None] >= offs_n[None, :])
+                qk = tl.where(keep, qk, float("-inf"))
+
+                p = tl.where(keep, tl.math.exp2(qk - lse_safe[:, None]), 0.0)
+                dv += tl.dot(tl.trans(p.to(do.dtype)), do)
+
+                dp = tl.dot(do, v_t)
+                ds = tl.where(keep, p * (dp - delta[:, None]) * sm_scale, 0.0)
+                dk += tl.dot(tl.trans(ds.to(q.dtype)), q)
+
+        tl.store(dk_base + offs_n[:, None] * stride_dkn + offs_d[None, :] * stride_dkd,
+                 dk.to(dK.dtype.element_ty), mask=n_valid[:, None])
+        tl.store(dv_base + offs_n[:, None] * stride_dvn + offs_d[None, :] * stride_dvd,
+                 dv.to(dV.dtype.element_ty), mask=n_valid[:, None])
+
+
+# ============================================================================
+# Low-level launch helpers and Autograd Function
+# ============================================================================
+
+def _block_list_attention_fwd(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    lists: torch.Tensor,
+    counts: torch.Tensor,
+    max_count: int,
+    *,
+    route_block: int,
+    is_causal: bool,
+    scale: float,
+    block_m: Optional[int],
+    block_n: Optional[int],
+    num_warps: int,
+    num_stages: int,
+    store_lse: bool,
+    soft_block_bias: Optional[torch.Tensor] = None,
+):
+    Z, H, N, D = q.shape
+    nb = triton.cdiv(N, route_block)
+    out = torch.empty_like(q)
+    lse = torch.empty((Z, H, N), dtype=torch.float32, device=q.device) if store_lse else out
+
+    has_soft_bias = soft_block_bias is not None
+    sb_tensor = soft_block_bias if has_soft_bias else q
+    sb_strides = soft_block_bias.stride() if has_soft_bias else (0, 0, 0, 0)
+
+    args = (
+        q, k, v, out, lse, lists, counts, sb_tensor, scale,
+        *q.stride(), *k.stride(), *v.stride(), *out.stride(),
+        *sb_strides,
+        H, N, nb, max_count, _next_pow2(max_count),
+    )
+    meta = dict(
+        HEAD_DIM=D,
+        ROUTE_BLOCK=route_block,
+        IS_CAUSAL=bool(is_causal),
+        STORE_LSE=bool(store_lse),
+        HAS_SOFT_BIAS=has_soft_bias,
+    )
+
+    use_autotune = block_m is None and block_n is None and q.is_cuda and not _INTERPRET
+    if use_autotune:
+        grid = lambda META: (triton.cdiv(N, META["BLOCK_M"]), Z * H)  # noqa: E731
+        _block_list_fwd_tuned[grid](*args, **meta)
+    else:
+        bm = block_m or min(64, route_block)
+        bn = block_n or min(64, route_block)
+        if route_block % bm or route_block % bn:
+            raise ValueError(f"block_m ({bm}) and block_n ({bn}) must divide route_block ({route_block})")
+        launch = dict(BLOCK_M=bm, BLOCK_N=bn, **meta)
+        if not _INTERPRET:
+            launch.update(num_warps=num_warps, num_stages=num_stages)
+        _block_list_fwd_kernel[(triton.cdiv(N, bm), Z * H)](*args, **launch)
+    return out, lse
+
+
+def _block_list_attention_bwd(
+    do: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    out: torch.Tensor,
+    lse: torch.Tensor,
+    lists: torch.Tensor,
+    counts: torch.Tensor,
+    max_count: int,
+    *,
+    route_block: int,
+    is_causal: bool,
+    scale: float,
+    block_m: Optional[int],
+    block_n: Optional[int],
+    num_warps: int,
+    num_stages: int,
+    soft_block_bias: Optional[torch.Tensor] = None,
+):
+    Z, H, N, D = q.shape
+    nb = triton.cdiv(N, route_block)
+    do = do.contiguous()
+
+    # Fast elementwise-reduction preprocess: delta_i = sum_d(do_{i,d} * out_{i,d})
+    delta = (do.float() * out.float()).sum(dim=-1).contiguous()
+
+    dq = torch.zeros_like(q)
+    dk = torch.zeros_like(k)
+    dv = torch.zeros_like(v)
+
+    has_soft_bias = soft_block_bias is not None
+    if has_soft_bias:
+        d_soft_bias = torch.zeros((Z, H, nb, max_count), dtype=torch.float32, device=q.device)
+        sb_tensor = soft_block_bias
+        sb_strides = soft_block_bias.stride()
+        dsb_strides = d_soft_bias.stride()
+    else:
+        d_soft_bias = None
+        sb_tensor = q
+        sb_strides = (0, 0, 0, 0)
+        dsb_strides = (0, 0, 0, 0)
+
+    bm = block_m or min(64, route_block)
+    bn = block_n or min(64, route_block)
+    if route_block % bm or route_block % bn:
+        raise ValueError(f"block_m ({bm}) and block_n ({bn}) must divide route_block ({route_block})")
+
+    if max_count > 0:
+        launch_dq = dict(
+            HEAD_DIM=D,
+            ROUTE_BLOCK=route_block,
+            IS_CAUSAL=bool(is_causal),
+            HAS_SOFT_BIAS=has_soft_bias,
+            BLOCK_M=bm,
+            BLOCK_N=bn,
+        )
+        if not _INTERPRET:
+            launch_dq.update(num_warps=num_warps, num_stages=num_stages)
+
+        _block_list_bwd_dq_kernel[(triton.cdiv(N, bm), Z * H)](
+            q, k, v, do, dq, lse, delta, lists, counts,
+            sb_tensor, d_soft_bias if has_soft_bias else q, scale,
+            *q.stride(), *k.stride(), *v.stride(), *do.stride(), *dq.stride(),
+            *sb_strides, *dsb_strides,
+            H, N, nb, max_count,
+            **launch_dq,
+        )
+
+        k_lists, q_counts, max_q_count = build_transposed_block_lists(
+            BlockLists(lists, counts, max_count), num_key_blocks=nb
+        )
+        if max_q_count > 0:
+            launch_dkdv = dict(
+                HEAD_DIM=D,
+                ROUTE_BLOCK=route_block,
+                IS_CAUSAL=bool(is_causal),
+                HAS_SOFT_BIAS=has_soft_bias,
+                BLOCK_M=bm,
+                BLOCK_N=bn,
+            )
+            if not _INTERPRET:
+                launch_dkdv.update(num_warps=num_warps, num_stages=num_stages)
+
+            _block_list_bwd_dkdv_kernel[(triton.cdiv(N, bn), Z * H)](
+                q, k, v, do, dk, dv, lse, delta, k_lists, q_counts, sb_tensor, scale,
+                *q.stride(), *k.stride(), *v.stride(), *do.stride(), *dk.stride(), *dv.stride(),
+                *sb_strides,
+                lists, counts, max_count,
+                H, N, nb, max_q_count,
+                **launch_dkdv,
+            )
+
+    if has_soft_bias and d_soft_bias is not None:
+        d_soft_bias = d_soft_bias.to(soft_block_bias.dtype)
+    return dq, dk, dv, d_soft_bias
+
+
+class _BlockListAttentionFn(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        lists: torch.Tensor,
+        counts: torch.Tensor,
+        max_count: int,
+        route_block: int,
+        is_causal: bool,
+        scale: float,
+        block_m: Optional[int],
+        block_n: Optional[int],
+        num_warps: int,
+        num_stages: int,
+        return_lse: bool,
+        soft_block_bias: Optional[torch.Tensor],
+    ):
+        out, lse = _block_list_attention_fwd(
+            q, k, v, lists, counts, max_count,
+            route_block=route_block,
+            is_causal=is_causal,
+            scale=scale,
+            block_m=block_m,
+            block_n=block_n,
+            num_warps=num_warps,
+            num_stages=num_stages,
+            store_lse=True,
+            soft_block_bias=soft_block_bias,
+        )
+        if soft_block_bias is not None:
+            ctx.save_for_backward(q, k, v, out, lse, lists, counts, soft_block_bias)
+            ctx.has_soft_bias = True
+        else:
+            ctx.save_for_backward(q, k, v, out, lse, lists, counts)
+            ctx.has_soft_bias = False
+        ctx.max_count = max_count
+        ctx.route_block = route_block
+        ctx.is_causal = is_causal
+        ctx.scale = scale
+        ctx.block_m = block_m
+        ctx.block_n = block_n
+        ctx.num_warps = num_warps
+        ctx.num_stages = num_stages
+        ctx.return_lse = return_lse
+        if return_lse:
+            ctx.mark_non_differentiable(lse)
+            return out, lse
+        return out
+
+    @staticmethod
+    def backward(ctx, *grad_outputs):
+        do = grad_outputs[0]
+        if ctx.has_soft_bias:
+            q, k, v, out, lse, lists, counts, soft_block_bias = ctx.saved_tensors
+        else:
+            q, k, v, out, lse, lists, counts = ctx.saved_tensors
+            soft_block_bias = None
+
+        dq, dk, dv, d_soft_bias = _block_list_attention_bwd(
+            do, q, k, v, out, lse, lists, counts, ctx.max_count,
+            route_block=ctx.route_block,
+            is_causal=ctx.is_causal,
+            scale=ctx.scale,
+            block_m=ctx.block_m,
+            block_n=ctx.block_n,
+            num_warps=ctx.num_warps,
+            num_stages=ctx.num_stages,
+            soft_block_bias=soft_block_bias,
+        )
+        return (
+            dq if ctx.needs_input_grad[0] else None,
+            dk if ctx.needs_input_grad[1] else None,
+            dv if ctx.needs_input_grad[2] else None,
+            None, None, None, None, None, None, None, None, None, None, None,
+            d_soft_bias if (ctx.has_soft_bias and ctx.needs_input_grad[14]) else None,
+        )
+
 
 # ============================================================================
 # Python wrappers
@@ -374,8 +939,9 @@ def block_list_attention(
     num_warps: int = 4,
     num_stages: int = 3,
     return_lse: bool = False,
+    soft_block_bias: Optional[torch.Tensor] = None,
 ):
-    """Block-sparse attention forward over precomputed block lists.
+    """Block-sparse attention over precomputed block lists (with sparse autograd support).
 
     Args:
         q, k, v: (Z, H, N, D), same shape and dtype (fp16/bf16; fp32 allowed but
@@ -389,6 +955,11 @@ def block_list_attention(
             route_block.
         return_lse: also return the per-row log-sum-exp (natural log) of the
             scaled scores, (Z, H, N) fp32; -inf for rows with no visible keys.
+        soft_block_bias: optional (Z, H, NB, max_count) additive logit bias per
+            active block pair ``(qb, kb_t)``. For STE router training, pass a
+            zero-valued STE bias ``soft_logits - soft_logits.detach()`` so the
+            forward pass is 100% hard-sparse while backward computes exact
+            gradients ``dL/d(soft_block_bias)[z, h, qb, t] = sum_{i in qb, j in kb_t} P_ij * (dO_i . V_j - Delta_i)``.
 
     Returns:
         out: (Z, H, N, D), same dtype as q; or (out, lse) if return_lse.
@@ -412,32 +983,41 @@ def block_list_attention(
                          f"(N={N}, route_block={route_block})")
     if lists.shape[-1] != max_count:
         raise ValueError("lists.shape[-1] must equal max_count")
+    if soft_block_bias is not None and tuple(soft_block_bias.shape) != (Z, H, nb, max_count):
+        raise ValueError(
+            f"soft_block_bias must have shape {(Z, H, nb, max_count)}, got {tuple(soft_block_bias.shape)}"
+        )
+
     lists = lists.to(torch.int32).contiguous()
     counts = counts.to(torch.int32).contiguous()
-
-    out = torch.empty_like(q)
-    lse = torch.empty((Z, H, N), dtype=torch.float32, device=q.device) if return_lse else out
     scale = sm_scale if sm_scale is not None else 1.0 / math.sqrt(D)
-    args = (
-        q, k, v, out, lse, lists, counts, scale,
-        *q.stride(), *k.stride(), *v.stride(), *out.stride(),
-        H, N, nb, max_count, _next_pow2(max_count),
-    )
-    meta = dict(HEAD_DIM=D, ROUTE_BLOCK=route_block, IS_CAUSAL=bool(is_causal), STORE_LSE=bool(return_lse))
 
-    use_autotune = block_m is None and block_n is None and q.is_cuda and not _INTERPRET
-    if use_autotune:
-        grid = lambda META: (triton.cdiv(N, META["BLOCK_M"]), Z * H)  # noqa: E731
-        _block_list_fwd_tuned[grid](*args, **meta)
-    else:
-        bm = block_m or min(64, route_block)
-        bn = block_n or min(64, route_block)
-        if route_block % bm or route_block % bn:
-            raise ValueError(f"block_m ({bm}) and block_n ({bn}) must divide route_block ({route_block})")
-        launch = dict(BLOCK_M=bm, BLOCK_N=bn, **meta)
-        if not _INTERPRET:
-            launch.update(num_warps=num_warps, num_stages=num_stages)
-        _block_list_fwd_kernel[(triton.cdiv(N, bm), Z * H)](*args, **launch)
+    needs_grad = torch.is_grad_enabled() and (
+        q.requires_grad
+        or k.requires_grad
+        or v.requires_grad
+        or (soft_block_bias is not None and soft_block_bias.requires_grad)
+    )
+    if needs_grad:
+        return _BlockListAttentionFn.apply(
+            q, k, v, lists, counts, max_count,
+            route_block, bool(is_causal), scale,
+            block_m, block_n, num_warps, num_stages,
+            bool(return_lse), soft_block_bias,
+        )
+
+    out, lse = _block_list_attention_fwd(
+        q, k, v, lists, counts, max_count,
+        route_block=route_block,
+        is_causal=bool(is_causal),
+        scale=scale,
+        block_m=block_m,
+        block_n=block_n,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        store_lse=bool(return_lse),
+        soft_block_bias=soft_block_bias,
+    )
     return (out, lse) if return_lse else out
 
 
@@ -453,9 +1033,11 @@ def routed_block_attention(
     sink_block: bool = False,
     local_blocks: int = 0,
     sm_scale: Optional[float] = None,
+    soft_block_bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Convenience wrapper: build the block lists, then run the kernel."""
     bl = build_block_lists(router_indices, req_depth, is_causal=is_causal,
                            sink_block=sink_block, local_blocks=local_blocks)
     return block_list_attention(q, k, v, bl, route_block=route_block,
-                                is_causal=is_causal, sm_scale=sm_scale)
+                                is_causal=is_causal, sm_scale=sm_scale,
+                                soft_block_bias=soft_block_bias)
