@@ -211,6 +211,8 @@ class SurgicalLlamaAttention(nn.Module):
         self.attn_dropout = nn.Dropout(_cfg_attr(config, "attention_dropout", 0.0, layer_idx=layer_idx))
 
         init_mode = _cfg_attr(config, "surgical_init_mode", "collapse")
+        self.triad_mode = bool(_cfg_attr(config, "surgical_triad_mode", False))
+        self.d_shell = int(_cfg_attr(config, "surgical_d_shell", 8))
         self.router = DynamicTopologyRouter(
             embed_dim=self.embed_dim,
             seq_len=max_pos_embeddings,
@@ -222,6 +224,8 @@ class SurgicalLlamaAttention(nn.Module):
             qk_mode=self.qk_mode,
             head_dim=self.head_dim,
             prime_arities=self.prime_arities,
+            triad_mode=self.triad_mode,
+            d_shell=self.d_shell,
         )
         self.p = self.router.p
 

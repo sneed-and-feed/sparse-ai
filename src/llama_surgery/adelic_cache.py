@@ -36,6 +36,8 @@ class SurprisalAdelicCache(DynamicCache):
         condensed_budget: Optional[int] = None,
         lambda_decay: float = 0.05,
         k_outlier: int = 2,
+        beltrami_mode: bool = True,
+        viscous_p: int = 2,
     ):
         super().__init__()
         assert max_capacity > local_window, "max_capacity must be strictly greater than local_window"
@@ -62,6 +64,8 @@ class SurprisalAdelicCache(DynamicCache):
 
         self.lambda_decay = float(lambda_decay)
         self.k_outlier = int(k_outlier)
+        self.beltrami_mode = bool(beltrami_mode)
+        self.viscous_p = max(1, int(viscous_p))
 
         self.key_cache: List[torch.Tensor] = []
         self.value_cache: List[torch.Tensor] = []
@@ -134,6 +138,30 @@ class SurprisalAdelicCache(DynamicCache):
         self._sync_hf_layers(layer_idx)
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
+    @staticmethod
+    def compute_beltrami_triad_flux(far_k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Computes the V4 Beltrami Triad-Flux score across coarse and fine frequency shells of `far_k`:
+          - Cross-shell exterior curl: ||u_coarse ^ u_fine||_2 = sqrt(1 - <u_coarse, u_fine>^2)
+          - Local fine-shell phase innovation: ||u_fine(t) - u_fine(t-1)||_2
+        Protects multi-token passcodes (e.g. '9481-OMEGA') and low-norm semantic needles
+        while suppressing high-norm laminar sink tokens where coarse and fine shells are collinear.
+        """
+        B, H, far_len, D = far_k.shape
+        half_d = max(1, D // 2)
+        u_coarse = F.normalize(far_k[..., :half_d].float(), p=2, dim=-1)
+        u_fine = F.normalize(far_k[..., -half_d:].float(), p=2, dim=-1)
+        cos_cf = (u_coarse * u_fine).sum(dim=-1).clamp(min=-1.0, max=1.0)
+        cross_shell_curl = torch.sqrt(torch.clamp(1.0 - cos_cf * cos_cf, min=0.0))  # (B, H, far_len)
+
+        fine_innovation = torch.zeros_like(cross_shell_curl)
+        if far_len > 1:
+            diff_prev = torch.norm(u_fine[:, :, 1:, :] - u_fine[:, :, :-1, :], p=2, dim=-1)
+            fine_innovation[:, :, 1:] = diff_prev
+            fine_innovation[:, :, :-1] = torch.maximum(fine_innovation[:, :, :-1], diff_prev)
+        beltrami_flux = cross_shell_curl * fine_innovation
+        return beltrami_flux, cross_shell_curl
+
     def _condense_layer(
         self,
         layer_idx: int,
@@ -193,7 +221,20 @@ class SurprisalAdelicCache(DynamicCache):
         kv_norm = kv_norm / (kv_norm.amax(dim=-1, keepdim=True) + 1e-6)
         peripheral_bonus = (token_occ <= self.k_outlier).float() * 1.5
 
-        outlier_score = far_surp + 2.5 * isolation_score + kv_norm + peripheral_bonus
+        if self.beltrami_mode and D >= 2:
+            beltrami_flux, cross_shell_curl = self.compute_beltrami_triad_flux(far_k)
+            # Gate static kv_norm by cross_shell_curl so laminar formatting sinks cannot hijack Tier 1
+            gated_kv_norm = kv_norm * (0.15 + 0.85 * cross_shell_curl)
+            outlier_score = (
+                far_surp
+                + 2.5 * isolation_score
+                + 3.5 * beltrami_flux
+                + gated_kv_norm
+                + peripheral_bonus
+            )
+        else:
+            outlier_score = far_surp + 2.5 * isolation_score + kv_norm + peripheral_bonus
+
         # Always protect Token 0 (Attention Sink) in Tier 1 if K_out > 0
         if K_out > 0:
             outlier_score = outlier_score.clone()
@@ -253,8 +294,14 @@ class SurprisalAdelicCache(DynamicCache):
             pos_var = pos_diff_sq.sum(dim=-2) / (counts - 1.0).clamp(min=1.0)
             pos_var = torch.where(counts > 1.0, pos_var, torch.zeros_like(pos_var))
 
-            # Synthetic RoPE decay multiplier gamma = exp(-lambda * Var(P_S))
-            gamma = torch.exp(-self.lambda_decay * pos_var).clamp(min=0.05, max=1.0)  # (B, H, C)
+            # Scale-covariant p-adic heat-kernel viscosity gamma = exp(-nu * p^{2*l_eff} * Var(P_S))
+            if self.beltrami_mode:
+                # Effective shell depth l_eff in [0, 2] scales with cluster compression ratio
+                compression_ratio = (counts / max(float(rem_len) / float(max(C, 1)), 1.0)).clamp(min=0.5, max=4.0)
+                viscous_scale = float(self.viscous_p) ** torch.log2(compression_ratio)
+                gamma = torch.exp(-self.lambda_decay * viscous_scale * pos_var).clamp(min=0.05, max=1.0)
+            else:
+                gamma = torch.exp(-self.lambda_decay * pos_var).clamp(min=0.05, max=1.0)  # (B, H, C)
 
             # Medoid Key selection: token in cluster with highest similarity to cluster mean V (ties -> latest)
             center_norm_v = F.normalize(tier2_v.float(), p=2, dim=-1)
@@ -294,5 +341,38 @@ class SurprisalAdelicCache(DynamicCache):
         return int(self._true_seen_tokens)
 
 
+class BeltramiAdelicCache(SurprisalAdelicCache):
+    """
+    V4 Beltrami Vortex Soliton Adèlic Cache.
+
+    Shields multi-token passcodes ('9481-OMEGA') and low-norm semantic needles
+    ('spherical coordinates') using cross-shell Beltrami triad flux rather than
+    static Euclidean key norm, and applies scale-covariant p-adic heat-kernel
+    dissipation in Tier 2 medoid condensation.
+    """
+
+    def __init__(
+        self,
+        max_capacity: int = 128,
+        local_window: int = 64,
+        outlier_budget: Optional[int] = None,
+        condensed_budget: Optional[int] = None,
+        lambda_decay: float = 0.05,
+        k_outlier: int = 2,
+        viscous_p: int = 2,
+    ):
+        super().__init__(
+            max_capacity=max_capacity,
+            local_window=local_window,
+            outlier_budget=outlier_budget,
+            condensed_budget=condensed_budget,
+            lambda_decay=lambda_decay,
+            k_outlier=k_outlier,
+            beltrami_mode=True,
+            viscous_p=viscous_p,
+        )
+
+
 # Backward-compatible alias
 TemporalAdelicCache = SurprisalAdelicCache
+

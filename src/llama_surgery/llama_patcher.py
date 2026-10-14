@@ -68,6 +68,8 @@ def patch_llama_model(
     target_density: float = 0.25,
     route_block: int = 128,
     only_global_layers: bool = False,
+    triad_mode: bool = False,
+    d_shell: int = 8,
     **kwargs
 ):
     """
@@ -93,6 +95,8 @@ def patch_llama_model(
         setattr(cfg, "surgical_distill_kl", distill_kl)
         setattr(cfg, "surgical_target_density", target_density)
         setattr(cfg, "surgical_route_block", route_block)
+        setattr(cfg, "surgical_triad_mode", triad_mode)
+        setattr(cfg, "surgical_d_shell", d_shell)
         if "local_window" in kwargs:
             setattr(cfg, "surgical_local_window", kwargs["local_window"])
         if "attention_backend" in kwargs:
@@ -205,8 +209,10 @@ def patch_llama_model(
         new_attn.v_norm = getattr(old_attn, "v_norm", None)
         new_attn.scale = getattr(old_attn, "scaling", new_attn.scale)
 
-        # Move to the same device and dtype
+        # Move to the same device and dtype, but keep router parameters in float32
+        # so +/-5.0 homotopy biases never suffer from bfloat16 ULP stagnation (ULP(5.0) = 0.03125)!
         new_attn.to(old_attn.q_proj.weight.device, dtype=old_attn.q_proj.weight.dtype)
+        new_attn.router.float()
 
         # Replace the module
         layer.self_attn = new_attn
@@ -227,6 +233,8 @@ def save_router_sidecar(model, path: str, extra_metadata: dict = None) -> dict:
     Saves all DynamicTopologyRouter parameters and Dual Lagrangian density_lambda buffers
     from a surgically-patched model into a compact `.safetensors` sidecar file (~15-40 MB),
     embedding the surgical topology configuration into the safetensors header metadata.
+    When `route_stride > 1`, automatically syncs trained anchor router weights to shared
+    non-anchor layers so sidecars never export dead zero weights on odd layers.
     """
     import json
     import os
@@ -236,12 +244,23 @@ def save_router_sidecar(model, path: str, extra_metadata: dict = None) -> dict:
     layers = _discover_decoder_layers(model)
     tensors = {}
     patched_layer_indices = []
+    anchor_routers = {}
 
     for i, layer in enumerate(layers):
         attn = getattr(layer, "self_attn", None)
         if attn is None or not hasattr(attn, "router"):
             continue
         patched_layer_indices.append(i)
+        group_key = (attn.num_heads, attn.head_dim)
+        stride = max(1, int(getattr(attn, "route_stride", 1)))
+        p_idx = int(getattr(attn, "patched_layer_idx", i))
+        w_norm = attn.router.route_heads.weight.detach().float().norm().item()
+        if (p_idx % stride == 0) or (w_norm > 1e-6):
+            anchor_routers[group_key] = attn.router.state_dict()
+        elif group_key in anchor_routers:
+            # Sync non-anchor layer with trained anchor router from the same (H, D) group
+            attn.router.load_state_dict(anchor_routers[group_key])
+
         for k, v in attn.router.state_dict().items():
             tensors[f"layers.{i}.self_attn.router.{k}"] = v.detach().contiguous().cpu()
         if hasattr(attn, "density_lambda") and isinstance(attn.density_lambda, torch.Tensor):
@@ -252,7 +271,7 @@ def save_router_sidecar(model, path: str, extra_metadata: dict = None) -> dict:
 
     cfg = model.config
     meta = {
-        "format": "sparse-ai-router-sidecar-v3",
+        "format": "sparse-ai-router-sidecar-v4",
         "model_type": str(getattr(cfg, "model_type", type(model).__name__)),
         "name_or_path": str(getattr(cfg, "_name_or_path", "")),
         "patched_layers": json.dumps(patched_layer_indices),
@@ -263,6 +282,8 @@ def save_router_sidecar(model, path: str, extra_metadata: dict = None) -> dict:
         "surgical_swin_shift": str(bool(getattr(cfg, "surgical_swin_shift", False))),
         "surgical_route_stride": str(getattr(cfg, "surgical_route_stride", 1)),
         "surgical_route_block": str(getattr(cfg, "surgical_route_block", 128)),
+        "surgical_triad_mode": str(bool(getattr(cfg, "surgical_triad_mode", False))),
+        "surgical_d_shell": str(getattr(cfg, "surgical_d_shell", 8)),
     }
     if extra_metadata:
         for k, v in extra_metadata.items():

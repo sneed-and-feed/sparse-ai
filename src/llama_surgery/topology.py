@@ -57,6 +57,8 @@ class DynamicTopologyRouter(nn.Module):
         qk_mode: bool = False,
         head_dim: Optional[int] = None,
         prime_arities: Optional[Sequence[int]] = None,
+        triad_mode: bool = False,
+        d_shell: int = 8,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -66,6 +68,8 @@ class DynamicTopologyRouter(nn.Module):
         self.init_mode = init_mode
         self.tree_mode = tree_mode
         self.qk_mode = qk_mode
+        self.triad_mode = bool(triad_mode)
+        self.d_shell = max(2, int(d_shell))
         self.head_dim = head_dim if head_dim is not None else max(1, embed_dim // max(1, num_heads))
 
         if prime_arities is not None and len(prime_arities) > 0:
@@ -106,6 +110,25 @@ class DynamicTopologyRouter(nn.Module):
             self.out_per_head = self.levels * self.p
             self.route_heads = nn.Linear(in_dim, num_heads * self.out_per_head)
 
+        if self.triad_mode and not self.tree_mode:
+            M = self.d_shell
+            ctx_dim = self.levels * self.p + M
+            self.shell_inject = nn.Parameter(torch.empty(self.num_heads, self.levels, M, in_dim))
+            self.triad_weight = nn.Parameter(
+                torch.empty(self.num_heads, max(1, self.levels - 1), ctx_dim, M, M)
+            )
+            self.triad_readout = nn.Parameter(
+                torch.empty(self.num_heads, max(1, self.levels - 1), self.p, M)
+            )
+            self.log_viscosity = nn.Parameter(torch.full((1, self.num_heads, 1, 1), -6.0))
+        else:
+            self.shell_inject = None
+            self.triad_weight = None
+            self.triad_readout = None
+            self.log_viscosity = None
+
+        self.last_triad_flux: Optional[torch.Tensor] = None
+
         with torch.no_grad():
             if init_mode == "random":
                 nn.init.normal_(self.backbone.weight, std=0.02)
@@ -130,35 +153,90 @@ class DynamicTopologyRouter(nn.Module):
                             b[idx] = 5.0
                     self.route_heads.bias.copy_(b)
 
-    def _project_logits(self, x: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
+            if self.triad_mode and not self.tree_mode:
+                M = self.d_shell
+                for h in range(self.num_heads):
+                    w_orth = torch.empty(self.levels * M, in_dim)
+                    nn.init.orthogonal_(w_orth, gain=1.0)
+                    self.shell_inject[h].copy_(w_orth.view(self.levels, M, in_dim))
+                nn.init.normal_(self.triad_weight, std=0.5 / math.sqrt(M))
+                if init_mode == "random":
+                    nn.init.normal_(self.triad_readout, std=0.5 / math.sqrt(M))
+                else:
+                    # Exact Inviscid Homotopy: zero triad_readout at Step 0 preserves 100% branch-0 collapse
+                    # while non-zero shell_inject & triad_weight provide immediate O(1) Step-1 gradients!
+                    nn.init.zeros_(self.triad_readout)
+
+    def _project_logits(self, x: torch.Tensor, tau: float = 1.0) -> Tuple[torch.Tensor, int, int]:
         """
-        Projects input tensor x into per-head routing logits.
-        Supports:
-          - 3D input: (batch, seq_len, in_dim) -> returns logits (batch, seq_len, num_heads, ...)
-          - 4D input: (batch, num_heads, num_blocks, 2 * head_dim) -> returns logits (batch, num_blocks, num_heads, ...)
+        Projects input tensor x into per-head routing logits in float32 (preventing bf16 ULP bias freeze).
+        Supports both flat V3 projection and V4 Tao-Katz-Pavlovic skew-symmetric dyadic triad cascade.
         """
+        orig_dtype = x.dtype
+        x_f = x.float()
+        w_bb = self.backbone.weight.float()
+        b_bb = self.backbone.bias.float() if self.backbone.bias is not None else None
+        h = F.gelu(F.linear(x_f, w_bb, b_bb))
+
         if x.dim() == 4:
             batch_size, num_heads, seq_len, _ = x.shape
             assert num_heads == self.num_heads, f"Expected {self.num_heads} heads, got {num_heads}"
-            h = F.gelu(self.backbone(x))  # (B, H, NB, in_dim)
-            w = self.route_heads.weight.view(self.num_heads, self.out_per_head, self.in_dim)
+            w = self.route_heads.weight.float().view(self.num_heads, self.out_per_head, self.in_dim)
             logits_bhso = torch.einsum("bhsi,hoi->bhso", h, w)
             if self.route_heads.bias is not None:
-                b = self.route_heads.bias.view(1, self.num_heads, 1, self.out_per_head)
+                b = self.route_heads.bias.float().view(1, self.num_heads, 1, self.out_per_head)
                 logits_bhso = logits_bhso + b
-            logits = logits_bhso.permute(0, 2, 1, 3).clamp(min=-50000.0, max=50000.0)
-            return logits, batch_size, seq_len
+            base_logits = logits_bhso.permute(0, 2, 1, 3)  # (B, S, H, out_per_head)
+            h_4d = h  # (B, H, S, in_dim)
         else:
             batch_size, seq_len, _ = x.shape
-            h = F.gelu(self.backbone(x))  # (batch, seq_len, in_dim)
-            logits = self.route_heads(h).clamp(min=-50000.0, max=50000.0)
-            return logits, batch_size, seq_len
+            w = self.route_heads.weight.float()
+            b = self.route_heads.bias.float() if self.route_heads.bias is not None else None
+            base_logits = F.linear(h, w, b)  # (B, S, H * out_per_head)
+            h_4d = h.unsqueeze(1).expand(batch_size, self.num_heads, seq_len, self.in_dim)
+
+        if self.triad_mode and not self.tree_mode and self.levels > 1:
+            base_5d = base_logits.view(batch_size, seq_len, self.num_heads, self.levels, self.p).permute(0, 2, 1, 3, 4)
+            f_shells = torch.einsum("bhnd,hlmd->bhnlm", h_4d, self.shell_inject.float())  # (B, H, S, L, M)
+            W_skew = self.triad_weight.float() - self.triad_weight.float().transpose(-1, -2)
+            nu = torch.exp(self.log_viscosity.float())
+
+            shell_logits = [base_5d[:, :, :, 0, :]]
+            u_prev = f_shells[:, :, :, 0, :]
+            flux_per_level = []
+
+            for ell in range(1, self.levels):
+                f_ell = f_shells[:, :, :, ell, :]
+                # Detached idempotent parent branch probabilities a^{(0..ell-1)} in [0, 1]^p
+                anc_probs = torch.cat(
+                    [F.softmax(z.detach() / max(tau, 0.2), dim=-1) for z in shell_logits], dim=-1
+                )
+                pad_len = self.levels * self.p - anc_probs.shape[-1]
+                if pad_len > 0:
+                    anc_probs = F.pad(anc_probs, (0, pad_len))
+                parent_ctx = torch.cat([anc_probs, F.normalize(u_prev.detach(), p=2, dim=-1)], dim=-1)
+
+                # Skew-symmetric bilinear triad pump B_ell(parent_ctx, f_ell) in so(M)
+                triad_pump = torch.einsum("bhni,bhnj,hijm->bhnm", parent_ctx, f_ell, W_skew[:, ell - 1])
+                flux_per_level.append(torch.norm(triad_pump, p=2, dim=-1))
+                damping = torch.exp(-nu * (float(self.p) ** (2 * ell)) * 1e-3)
+                u_next = damping * (u_prev + f_ell + triad_pump)
+                triad_logit = torch.einsum("bhnm,hpm->bhnp", triad_pump, self.triad_readout[:, ell - 1].float())
+                shell_logits.append(base_5d[:, :, :, ell, :] + damping * triad_logit)
+                u_prev = u_next
+
+            self.last_triad_flux = torch.stack(flux_per_level, dim=-1).mean(dim=-1).detach()  # (B, H, S)
+            logits_5d = torch.stack(shell_logits, dim=3)  # (B, H, S, L, p)
+            logits_out = logits_5d.permute(0, 2, 1, 3, 4).reshape(batch_size, seq_len, -1)
+            return logits_out.clamp(min=-50000.0, max=50000.0).to(orig_dtype), batch_size, seq_len
+
+        return base_logits.clamp(min=-50000.0, max=50000.0).to(orig_dtype), batch_size, seq_len
 
     def forward(
         self, x: torch.Tensor, tau_override: Optional[float] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         tau = tau_override if tau_override is not None else self.tau
-        logits, batch_size, seq_len = self._project_logits(x)
+        logits, batch_size, seq_len = self._project_logits(x, tau=tau)
 
         if self.tree_mode:
             logits = logits.view(batch_size, seq_len, self.num_heads, self.num_internal, self.p)
@@ -250,26 +328,29 @@ class DynamicTopologyRouter(nn.Module):
     @staticmethod
     def compute_load_balance_loss(assignments: torch.Tensor) -> torch.Tensor:
         """
-        Switch Transformer-style load balancing loss.
+        Hierarchical Multi-Shell Switch Load Balancing Loss.
 
-        Computes the joint probability of the full root-to-leaf path to prevent
-        the model from collapsing into highly correlated parallel choices.
+        Balances joint prefix path probabilities across all intermediate shells
+        l = 0 .. min(L, 6)-1 (preventing deep levels from collapsing onto level 0).
         """
         B, H, S, L, p = assignments.shape
-        if L <= 8 and (p ** L) <= 4096:
-            joint_P = assignments[..., 0, :]
-            for l in range(1, L):
-                joint_P = joint_P.unsqueeze(-1) * assignments[..., l, :].unsqueeze(-2)
-                joint_P = joint_P.view(B, H, S, -1)
-            num_paths = p ** L
-            f = (joint_P.detach() > 0.5).float().mean(dim=2)
-            P = joint_P.mean(dim=2)
-            loss = (f * P).sum(dim=-1).mean() * num_paths
-        else:
-            f = (assignments.detach() > 0.5).float().mean(dim=2)
-            P = assignments.mean(dim=2)
-            loss = (f * P).sum(dim=-1).mean() * p
-        return loss
+        a_f32 = assignments.float()
+        f_marg = (a_f32.detach() > 0.5).float().mean(dim=2)
+        P_marg = a_f32.mean(dim=2)
+        total_loss = (f_marg * P_marg).sum(dim=-1).mean() * float(p)
+
+        max_depth = min(L, 6)
+        if max_depth > 1 and (p ** max_depth) <= 4096:
+            joint_P = a_f32[..., 0, :]
+            shell_losses = []
+            for l in range(1, max_depth):
+                joint_P = (joint_P.unsqueeze(-1) * a_f32[..., l, :].unsqueeze(-2)).reshape(B, H, S, -1)
+                num_paths = joint_P.shape[-1]
+                f_l = (joint_P.detach() > 0.5).float().mean(dim=2)
+                P_l = joint_P.mean(dim=2)
+                shell_losses.append((f_l * P_l).sum(dim=-1).mean() * float(num_paths))
+            total_loss = 0.5 * total_loss + 0.5 * (sum(shell_losses) / len(shell_losses))
+        return total_loss
 
     @staticmethod
     def get_tau_schedule(
@@ -306,6 +387,8 @@ class MultiPrimeTopologyRouter(DynamicTopologyRouter):
         tree_mode: bool = False,
         qk_mode: bool = False,
         head_dim: Optional[int] = None,
+        triad_mode: bool = False,
+        d_shell: int = 8,
     ):
         super().__init__(
             embed_dim=embed_dim,
@@ -320,6 +403,51 @@ class MultiPrimeTopologyRouter(DynamicTopologyRouter):
             qk_mode=qk_mode,
             head_dim=head_dim,
             prime_arities=prime_arities,
+            triad_mode=triad_mode,
+            d_shell=d_shell,
+        )
+
+
+class TriadTopologyRouter(DynamicTopologyRouter):
+    """
+    V4 Tao–Katz–Pavlović Dyadic Triad Cascade Router.
+
+    Replaces flat independent tree-level projections with a recursive skew-symmetric
+    bilinear triad cascade B_ell(u^{(0..ell-1)}, f^{(ell)}(x)) in so(d_shell) down
+    the Bruhat-Tits tree levels ell = 0 .. L-1, damped by scale-covariant p-adic
+    viscosity exp(-nu_h * p^{2*ell}).
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        seq_len: int,
+        num_heads: int = 1,
+        p: int = 2,
+        tau: float = 1.0,
+        hard: bool = True,
+        init_mode: str = "collapse",
+        levels: Optional[int] = None,
+        qk_mode: bool = True,
+        head_dim: Optional[int] = None,
+        prime_arities: Optional[Sequence[int]] = None,
+        d_shell: int = 8,
+    ):
+        super().__init__(
+            embed_dim=embed_dim,
+            seq_len=seq_len,
+            num_heads=num_heads,
+            p=p,
+            tau=tau,
+            hard=hard,
+            init_mode=init_mode,
+            levels=levels,
+            tree_mode=False,
+            qk_mode=qk_mode,
+            head_dim=head_dim,
+            prime_arities=prime_arities,
+            triad_mode=True,
+            d_shell=d_shell,
         )
 
 
@@ -328,12 +456,9 @@ def compute_expected_block_distance(assignments: torch.Tensor, p: int = 2) -> to
     Computes the differentiable expected p-adic (cophenetic) distance directly at
     block granularity without expanding to N x N tokens.
 
-    Args:
-        assignments: (batch, heads, num_blocks, levels, p) or (batch, num_blocks, levels, p)
-        p: tree arity (unused in einsum since last dim of assignments encodes branches)
-
-    Returns:
-        expected_dist: (batch, heads, num_blocks, num_blocks) or (batch, num_blocks, num_blocks)
+    Uses a Straight-Through leaky prefix product in the backward pass to eliminate
+    the cummin tie-breaking zero-gradient starvation at deeper tree shells ell >= 1,
+    while preserving the exact ultrametric prefix distance in the forward pass.
     """
     levels = assignments.shape[-2]
     if assignments.dim() == 5:
@@ -344,6 +469,10 @@ def compute_expected_block_distance(assignments: torch.Tensor, p: int = 2) -> to
         raise ValueError(f"Expected 4D or 5D assignments tensor, got {assignments.dim()}D")
 
     P_prefix = M.cummin(dim=-1)[0]
+    if M.requires_grad:
+        M_leaky = 0.95 * M.clamp(min=0.0, max=1.0) + 0.05
+        P_soft = torch.cumprod(M_leaky, dim=-1)
+        P_prefix = P_prefix.detach() - P_soft.detach() + P_soft
     sum_P = P_prefix.sum(dim=-1)
     return levels - sum_P
 

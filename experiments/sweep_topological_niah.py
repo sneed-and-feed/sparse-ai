@@ -205,11 +205,12 @@ def warmup_router_wikitext(
     print(f"\n[Unsupervised Warmup] Training router on WikiText / natural language text ({steps} steps, max_length={max_length}, LR={lr})...")
     
     # Freeze backbone (including any MoE expert routers like Gemma4TextRouter), train ONLY DynamicTopologyRouter parameters
+    from llama_surgery.topology import DynamicTopologyRouter
     for p in model.parameters():
         p.requires_grad = False
     unfroze_any = False
     for m in model.modules():
-        if m.__class__.__name__ == "DynamicTopologyRouter":
+        if isinstance(m, DynamicTopologyRouter):
             for p in m.parameters():
                 p.requires_grad = True
                 unfroze_any = True
@@ -314,7 +315,21 @@ def warmup_router_wikitext(
         lb_val = lb_loss.detach().item() if isinstance(lb_loss, torch.Tensor) else float(lb_loss)
         dist_val = distill_loss.detach().item() if isinstance(distill_loss, torch.Tensor) else float(distill_loss)
         pbar.set_postfix({"loss": f"{loss.item():.3f}", "lb_loss": f"{lb_val:.3f}", "distill": f"{dist_val:.3f}"})
-        
+
+    # Sync trained anchor routers to shared non-anchor layers when route_stride > 1
+    anchor_routers = {}
+    for idx_l, layer in enumerate(layers):
+        attn = getattr(layer, "self_attn", None)
+        if attn is None or not hasattr(attn, "router"):
+            continue
+        group_key = (attn.num_heads, attn.head_dim)
+        stride = max(1, int(getattr(attn, "route_stride", 1)))
+        p_idx = int(getattr(attn, "patched_layer_idx", idx_l))
+        if p_idx % stride == 0:
+            anchor_routers[group_key] = attn.router.state_dict()
+        elif group_key in anchor_routers:
+            attn.router.load_state_dict(anchor_routers[group_key])
+
     if hasattr(model, "gradient_checkpointing_disable"):
         model.gradient_checkpointing_disable()
         
@@ -624,15 +639,30 @@ def main():
                         help="'eager' = token-level routed mask (original); 'block_list' = block-granular "
                              "routing + Triton block-list kernel for prefill (CUDA fp16/bf16)")
     parser.add_argument("--tree_mode", action="store_true", help="Use Option B: true tree router")
+    parser.add_argument("--qk_mode", action="store_true", help="Post-RoPE block-pooled (Q,K) routing")
+    parser.add_argument("--prime_arities", type=str, default="", help="Comma-separated multi-prime arities, e.g. '2,3'")
+    parser.add_argument("--swin_shift", action="store_true", help="Odd-layer Swin cyclic block shifting")
+    parser.add_argument("--route_stride", type=int, default=1, help="Cross-layer routing reuse stride")
+    parser.add_argument("--distill_kl", action="store_true", help="Block-level KL distillation + Dual Lagrangian")
+    parser.add_argument("--target_density", type=float, default=0.25, help="Target block density for Dual Lagrangian")
+    parser.add_argument("--triad_mode", action="store_true", help="V4 Tao-Katz-Pavlovic skew-symmetric dyadic triad cascade router")
+    parser.add_argument("--d_shell", type=int, default=8, help="Shell latent dimension M for V4 triad cascade router")
+    parser.add_argument("--train_max_length", type=int, default=384, help="Token length per WikiText warmup step")
+    parser.add_argument("--only_global_layers", action="store_true", help="Patch only global full-attention layers (for Gemma 3/4)")
+    parser.add_argument("--save_router", type=str, default="", help="Optional path to save trained router sidecar (.safetensors)")
+    parser.add_argument("--load_router", type=str, default="", help="Optional path to load pre-warmed router sidecar (.safetensors)")
     parser.add_argument("--kolibri_rope", action="store_true", help="Strip RoPE from every 5th layer (kolibri pattern)")
     args = parser.parse_args()
     depth_values = [int(d) for d in args.depths.split(",") if d.strip()]
+    prime_arities = [int(p) for p in args.prime_arities.split(",") if p.strip()] or None
     
     print("\n" + "=" * 70)
     print("SPARSE AI: TOPOLOGICAL NIAH RETRIEVAL SWEEP BENCHMARK")
     print(f"Model: {args.model_id} | Device: {args.device}")
     print(f"Context: {args.context_len} | Needle Positions: {args.num_positions}")
     print(f"Router Init Mode: '{args.init_mode}' | Warmup: {'Skipped (Frozen)' if args.skip_warmup else args.warmup_dataset} | Needle: '{args.needle_type}'")
+    if args.triad_mode:
+        print(f"V4 Triad Cascade: enabled (d_shell={args.d_shell}, qk_mode={args.qk_mode}, primes={prime_arities}, swin={args.swin_shift})")
     if args.load_in_8bit:
         print("Quantization: 8-bit (bitsandbytes)")
     elif args.load_in_4bit:
@@ -668,19 +698,41 @@ def main():
     )
     
     # 3. Inject Dynamic Topology Router
-    print(f"\n[2/4] Injecting Dynamic Topology Router (LLaMA Surgery, init_mode='{args.init_mode}')...")
-    model = inject_surgery(model, tree_depth=5, arity=2, preserve_sinks=True, init_mode=args.init_mode, tree_mode=args.tree_mode)
+    print(f"\n[2/4] Injecting Dynamic Topology Router (LLaMA Surgery, init_mode='{args.init_mode}', triad_mode={args.triad_mode})...")
+    model = inject_surgery(
+        model,
+        tree_depth=5,
+        arity=2,
+        preserve_sinks=True,
+        init_mode=args.init_mode,
+        tree_mode=args.tree_mode,
+        qk_mode=args.qk_mode,
+        prime_arities=prime_arities,
+        swin_shift=args.swin_shift,
+        route_stride=args.route_stride,
+        distill_kl=args.distill_kl,
+        target_density=args.target_density,
+        triad_mode=args.triad_mode,
+        d_shell=args.d_shell,
+        only_global_layers=args.only_global_layers,
+    )
     
-    # 4. Router Warmup
-    if not args.skip_warmup:
+    # 4. Router Warmup or Sidecar Load
+    from llama_surgery import save_router_sidecar, load_router_sidecar
+    if args.load_router:
+        print(f"\n[3/4] Loading pre-warmed router sidecar from {args.load_router}...")
+        load_router_sidecar(model, args.load_router)
+    elif not args.skip_warmup:
         if args.warmup_dataset == "wikitext":
             print("\n[3/4] Warming up router on unsupervised WikiText / natural language text (Zero NIAH Training)...")
-            warmup_router_wikitext(model, tokenizer, steps=args.train_steps, device=args.device)
+            warmup_router_wikitext(model, tokenizer, steps=args.train_steps, device=args.device, max_length=args.train_max_length)
         else:
             print(f"\n[3/4] Warming up router on NIAH task distribution (needle='{args.needle_type}')...")
             warmup_router_niah(model, tokenizer, steps=args.train_steps, device=args.device, needle_type=args.needle_type)
     else:
         print(f"\n[3/4] Skipping router warmup (Frozen Router, init_mode='{args.init_mode}').")
+    if args.save_router:
+        save_router_sidecar(model, args.save_router, extra_metadata={"train_steps": args.train_steps, "train_max_length": args.train_max_length})
         
     # 5. Run Sweep
     model.eval()

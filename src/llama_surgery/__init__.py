@@ -9,11 +9,12 @@ from .surgery_trainer import SurgeryTrainer, TauAnnealingCallback
 from .topology import (
     DynamicTopologyRouter,
     MultiPrimeTopologyRouter,
+    TriadTopologyRouter,
     compute_expected_block_distance,
 )
 from .qat import QATLinear, inject_qat, FakeQuantizeSTE
-from .adelic_cache import SurprisalAdelicCache, TemporalAdelicCache
-from .speculative import SpeculativeSurgicalGenerator
+from .adelic_cache import SurprisalAdelicCache, BeltramiAdelicCache, TemporalAdelicCache
+from .speculative import SpeculativeSurgicalGenerator, ZenoSpeculativeGenerator
 
 try:
     from .multimodal_injector import MultimodalEncoder, VisionProjection
@@ -32,13 +33,16 @@ __all__ = [
     "TauAnnealingCallback",
     "DynamicTopologyRouter",
     "MultiPrimeTopologyRouter",
+    "TriadTopologyRouter",
     "compute_expected_block_distance",
     "QATLinear",
     "inject_qat",
     "FakeQuantizeSTE",
     "SurprisalAdelicCache",
+    "BeltramiAdelicCache",
     "TemporalAdelicCache",
     "SpeculativeSurgicalGenerator",
+    "ZenoSpeculativeGenerator",
     "MultimodalEncoder",
     "VisionProjection",
 ]

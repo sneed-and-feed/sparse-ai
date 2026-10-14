@@ -468,3 +468,256 @@ def test_speculative_surgical_generator_exact_greedy_and_stochastic():
     )
     assert stoch_seq.shape == (1, prompt.shape[1] + 5)
     assert stoch_stats["total_steps"] >= 1
+
+
+# ============================================================================
+# 7. V4 Upgrades: TriadTopologyRouter, BeltramiAdelicCache, ZenoSpeculativeGenerator
+# ============================================================================
+
+
+def test_v4_triad_topology_router_conservation_and_deep_gradients():
+    from llama_surgery import TriadTopologyRouter
+
+    B, H, NB, D = 2, 4, 8, 16
+    router = TriadTopologyRouter(
+        embed_dim=H * D,
+        seq_len=512,
+        num_heads=H,
+        p=2,
+        init_mode="collapse",
+        levels=5,
+        qk_mode=True,
+        head_dim=D,
+        d_shell=8,
+    )
+    assert router.triad_mode is True
+
+    # 1. Step-0 collapse homotopy: exact dense mask (branch 0 = 1.0 across all 5 levels)
+    router.eval()
+    qk_desc = torch.randn(B, H, NB, 2 * D)
+    assign_eval, _ = router(qk_desc)
+    assert assign_eval.shape == (B, H, NB, 5, 2)
+    assert torch.all(assign_eval[..., 0] == 1.0)
+    assert torch.all(assign_eval[..., 1] == 0.0)
+    assert router.last_triad_flux is not None
+    assert router.last_triad_flux.shape == (B, H, NB)
+
+    # 2. Skew-symmetric bilinear triad orthogonality check: <f_ell, B_W(parent_ctx, f_ell)> == 0
+    ctx_dim = router.levels * router.p + router.d_shell
+    u_parent = torch.randn(B, H, NB, ctx_dim)
+    f_ell = torch.randn(B, H, NB, router.d_shell)
+    W_raw = router.triad_weight[:, 0]  # (H, ctx_dim, M, M)
+    W_skew = W_raw - W_raw.transpose(-1, -2)
+    triad_pump = torch.einsum("bhni,bhnj,hijm->bhnm", u_parent, f_ell, W_skew)
+    inner_prod = (f_ell * triad_pump).sum(dim=-1)
+    assert torch.allclose(inner_prod, torch.zeros_like(inner_prod), atol=1e-5)
+
+    # 3. Non-starved gradient flow through all levels l=1..4 (no cummin tie-breaking starvation)
+    router_rand = TriadTopologyRouter(
+        embed_dim=H * D,
+        seq_len=512,
+        num_heads=H,
+        p=2,
+        init_mode="random",
+        levels=5,
+        qk_mode=True,
+        head_dim=D,
+        d_shell=8,
+    )
+    router_rand.train()
+    qk_train = torch.randn(B, H, NB, 2 * D, requires_grad=True)
+    assign_train, lb_loss = router_rand(qk_train, tau_override=1.0)
+    dist = compute_expected_block_distance(assign_train)
+    target_sim = torch.eye(NB).unsqueeze(0).unsqueeze(0)
+    loss = (dist * target_sim).mean() + lb_loss
+    loss.backward()
+
+    assert router_rand.triad_weight.grad is not None
+    assert router_rand.triad_readout.grad is not None
+    for ell in range(4):
+        assert router_rand.triad_weight.grad[:, ell].abs().max().item() > 0.0
+        assert router_rand.triad_readout.grad[:, ell].abs().max().item() > 0.0
+
+
+def test_v4_patcher_float32_router_and_stride_sidecar_sync(tmp_path):
+    from llama_surgery import save_router_sidecar, load_router_sidecar
+
+    vlm = _DummyVLMWrapper()
+    # Cast backbone to bfloat16 to verify router stays in float32
+    for p in vlm.parameters():
+        p.data = p.data.to(torch.bfloat16)
+
+    patch_llama_model(
+        vlm,
+        tree_depth=4,
+        arity=2,
+        qk_mode=True,
+        prime_arities=[2, 3],
+        swin_shift=True,
+        route_stride=2,
+        route_block=4,
+        triad_mode=True,
+        d_shell=8,
+    )
+    layers = vlm.model.language_model.layers
+    # Router parameters must remain float32 even when model is bfloat16
+    assert layers[0].self_attn.router.backbone.weight.dtype == torch.float32
+    assert layers[0].self_attn.router.triad_weight.dtype == torch.float32
+    assert layers[0].self_attn.router.shell_inject.dtype == torch.float32
+
+    # Modify anchor layer 0 router weights, leave non-anchor layer 1 untouched
+    with torch.no_grad():
+        layers[0].self_attn.router.backbone.weight.fill_(0.1234)
+        layers[1].self_attn.router.backbone.weight.zero_()
+
+    sidecar_file = str(tmp_path / "v4_router_sidecar.safetensors")
+    save_router_sidecar(vlm, sidecar_file)
+
+    # Verify save_router_sidecar synchronized anchor layer 0 weights to non-anchor layer 1
+    assert torch.allclose(
+        layers[1].self_attn.router.backbone.weight,
+        layers[0].self_attn.router.backbone.weight,
+        atol=1e-6,
+    )
+
+    # Verify reload into a fresh model
+    vlm2 = _DummyVLMWrapper()
+    patch_llama_model(
+        vlm2,
+        tree_depth=4,
+        arity=2,
+        qk_mode=True,
+        prime_arities=[2, 3],
+        swin_shift=True,
+        route_stride=2,
+        route_block=4,
+        triad_mode=True,
+        d_shell=8,
+    )
+    meta = load_router_sidecar(vlm2, sidecar_file)
+    assert meta["format"] == "sparse-ai-router-sidecar-v4"
+    assert meta["surgical_triad_mode"] == "True"
+    assert torch.allclose(
+        vlm2.model.language_model.layers[1].self_attn.router.backbone.weight,
+        layers[0].self_attn.router.backbone.weight,
+        atol=1e-6,
+    )
+
+
+def test_v4_beltrami_adelic_cache_passcode_and_banal_needle_shielding():
+    from llama_surgery import BeltramiAdelicCache
+
+    B, H, D = 1, 2, 16
+    half_d = D // 2
+    S_far = 64
+    local_win = 8
+    outlier_budget = 8
+    condensed_budget = 16
+    max_cap = outlier_budget + condensed_budget + local_win
+
+    torch.manual_seed(2026)
+    # Build coherent laminar background where coarse and fine shells are collinear (curl = 0)
+    u_coarse_bg = F.normalize(torch.randn(B, H, 1, half_d), dim=-1)
+    noise_half = 0.05 * torch.randn(B, H, S_far + local_win, half_d)
+    bg_half = F.normalize(u_coarse_bg + noise_half, dim=-1)
+    keys = torch.cat([bg_half, bg_half], dim=-1) * 2.5
+    values = keys.clone()
+
+    # Inject 8 high-norm laminar attention sinks at positions 2..9 (norm = 18.0, collinear coarse/fine shells)
+    for idx, pos in enumerate(range(2, 10)):
+        sink_half = torch.zeros(B, H, half_d)
+        sink_half[..., idx % half_d] = 1.0
+        # Collinear coarse & fine shells -> zero cross-shell curl, but huge static norm & isolation!
+        sink_vec = torch.cat([sink_half, sink_half], dim=-1) * 18.0
+        keys[:, :, pos, :] = sink_vec
+        values[:, :, pos, :] = sink_vec
+
+    # Inject a low-norm (||k|| = 1.8) 4-token banal needle / passcode at positions 28..31:
+    # Coarse shell blends with background topic, while fine shell carries orthogonal Beltrami curl & innovation!
+    passcode_positions = [28, 29, 30, 31]
+    passcode_vecs = []
+    for idx, pos in enumerate(passcode_positions):
+        fine_vec = torch.zeros(B, H, half_d)
+        fine_vec[..., (idx * 2 + 1) % half_d] = 1.0
+        # Orthogonal to u_coarse_bg in fine shell -> maximal cross-shell curl and fine-shell innovation
+        k_vec = torch.cat([u_coarse_bg.squeeze(2), fine_vec], dim=-1) * 1.2
+        v_vec = torch.cat([-u_coarse_bg.squeeze(2), fine_vec * 2.0], dim=-1) * 1.5
+        keys[:, :, pos, :] = k_vec
+        values[:, :, pos, :] = v_vec
+        passcode_vecs.append(v_vec)
+
+    # 1. Static Euclidean norm shield (beltrami_mode=False) gets hijacked by the 8 collinear laminar sinks
+    static_cache = SurprisalAdelicCache(
+        max_capacity=max_cap,
+        local_window=local_win,
+        outlier_budget=outlier_budget,
+        condensed_budget=condensed_budget,
+        beltrami_mode=False,
+    )
+    _, v_static = static_cache.update(keys.clone(), values.clone(), layer_idx=0)
+    tier1_v_static = v_static[:, :, :outlier_budget, :]
+
+    # 2. V4 Beltrami Triad-Flux shield (BeltramiAdelicCache) rescues the low-norm passcode
+    beltrami_cache = BeltramiAdelicCache(
+        max_capacity=max_cap,
+        local_window=local_win,
+        outlier_budget=outlier_budget,
+        condensed_budget=condensed_budget,
+    )
+    _, v_beltrami = beltrami_cache.update(keys.clone(), values.clone(), layer_idx=0)
+    tier1_v_beltrami = v_beltrami[:, :, :outlier_budget, :]
+
+    static_retained = 0
+    beltrami_retained = 0
+    for target_v in passcode_vecs:
+        if (tier1_v_static - target_v.unsqueeze(2)).abs().max(dim=-1).values.min().item() < 1e-4:
+            static_retained += 1
+        if (tier1_v_beltrami - target_v.unsqueeze(2)).abs().max(dim=-1).values.min().item() < 1e-4:
+            beltrami_retained += 1
+
+    assert beltrami_retained == len(passcode_positions), (
+        f"BeltramiAdelicCache should retain all {len(passcode_positions)} low-norm passcode tokens, got {beltrami_retained}"
+    )
+    assert beltrami_retained > static_retained
+
+
+def test_v4_zeno_speculative_generator_dynamic_depth_and_greedy_equivalence():
+    from llama_surgery import ZenoSpeculativeGenerator
+
+    torch.manual_seed(99)
+    model = _TinySurgicalCausalLM(vocab_size=24, hidden_size=32)
+    # Upgrade model's attention router to TriadTopologyRouter (triad_mode=True)
+    model.config.surgical_triad_mode = True
+    model.attn = SurgicalLlamaAttention(model.config, layer_idx=0)
+    model.eval()
+
+    prompt = torch.tensor([[2, 4, 6, 8]], dtype=torch.long)
+    max_new = 6
+
+    # 1. Dense greedy reference (req_depth = 0)
+    model.config.surgical_req_depth = 0
+    expected_seq = prompt.clone()
+    with torch.no_grad():
+        for _ in range(max_new):
+            logits = model(expected_seq).logits[:, -1, :]
+            next_tok = logits.argmax(dim=-1, keepdim=True)
+            expected_seq = torch.cat([expected_seq, next_tok], dim=-1)
+
+    # 2. ZenoSpeculativeGenerator greedy verification
+    zeno_gen = ZenoSpeculativeGenerator(
+        model,
+        gamma=3,
+        draft_req_depth=2,
+        verify_req_depth=0,
+        min_draft_depth=1,
+        max_draft_depth=3,
+        flux_threshold=0.25,
+    )
+    zeno_seq, stats = zeno_gen.generate(
+        prompt, max_new_tokens=max_new, temperature=0.0, return_stats=True
+    )
+
+    assert torch.equal(zeno_seq, expected_seq)
+    assert len(stats["draft_depths_used"]) == stats["total_drafted"]
+    assert all(1 <= d <= 3 for d in stats["draft_depths_used"])
+

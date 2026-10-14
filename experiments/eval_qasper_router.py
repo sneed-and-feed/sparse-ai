@@ -233,6 +233,8 @@ def main():
     ap.add_argument("--route_stride", type=int, default=1, help="Cross-layer routing reuse stride (e.g. 4)")
     ap.add_argument("--distill_kl", action="store_true", help="Block-level KL distillation + Dual Lagrangian density penalty")
     ap.add_argument("--target_density", type=float, default=0.25, help="Target active block density for Dual Lagrangian")
+    ap.add_argument("--triad_mode", action="store_true", help="V4 Tao-Katz-Pavlovic skew-symmetric dyadic triad cascade router")
+    ap.add_argument("--d_shell", type=int, default=8, help="Shell latent dimension M for V4 triad cascade router")
     ap.add_argument("--only_global_layers", action="store_true", help="Patch only global full-attention layers (for Gemma 3/4)")
     ap.add_argument("--no_window_baseline", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
@@ -255,6 +257,8 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     suffix = "" if args.attention_backend == "eager" else f"_{args.attention_backend}"
+    if args.triad_mode:
+        suffix += "_v4_triad"
     pred_path = os.path.join(args.output_dir, f"qasper_router_predictions{suffix}.jsonl")
     sum_path = os.path.join(args.output_dir, f"qasper_router_summary{suffix}.json")
 
@@ -267,7 +271,10 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(args.model_id, torch_dtype=dtype,
                                                  device_map="cuda", token=hf_token)
 
-    print(f"[2/4] Injecting router (tree_depth=5, arity=2, qk_mode={args.qk_mode}, primes={prime_arities}, swin={args.swin_shift})")
+    print(
+        f"[2/4] Injecting router (tree_depth=5, arity=2, qk_mode={args.qk_mode}, "
+        f"primes={prime_arities}, swin={args.swin_shift}, triad_mode={args.triad_mode}, d_shell={args.d_shell})"
+    )
     model = inject_surgery(
         model,
         tree_depth=5,
@@ -281,6 +288,8 @@ def main():
         route_stride=args.route_stride,
         distill_kl=args.distill_kl,
         target_density=args.target_density,
+        triad_mode=args.triad_mode,
+        d_shell=args.d_shell,
         only_global_layers=args.only_global_layers,
     )
     tcfg = getattr(model.config, "text_config", model.config)
