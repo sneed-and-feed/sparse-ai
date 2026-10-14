@@ -285,6 +285,7 @@ def build_block_lists_jax(
 
 
 _TPU_NUM_LANES = 128
+_TPU_SMEM_BUDGET_BYTES = 512 * 1024  # Safe 512 KB budget inside 1 MB SMEM
 
 
 def _tile_lanes_to_dim(x_lanes: jnp.ndarray, target_dim: int) -> jnp.ndarray:
@@ -298,7 +299,7 @@ def _tile_lanes_to_dim(x_lanes: jnp.ndarray, target_dim: int) -> jnp.ndarray:
 
 
 def _pallas_tpu_block_list_attn_kernel(
-    lists_ref,      # SMEM: (ZH, nb, nb) int32
+    lists_ref,      # SMEM: (ZH, nb, max_steps) int32
     counts_ref,     # SMEM: (ZH, nb) int32
     q_ref,          # VMEM: (block_size, D)
     k_ref,          # VMEM: (block_size, D) for current active step
@@ -333,9 +334,15 @@ def _pallas_tpu_block_list_attn_kernel(
 
     @pl.when(step < count)
     def _step():
-        q = q_ref[...].astype(jnp.float32)
-        k_tile = k_ref[...].astype(jnp.float32)
-        v_tile = v_ref[...].astype(jnp.float32)
+        in_dtype = q_ref.dtype
+        dot_prec = (
+            jax.lax.Precision.HIGHEST
+            if in_dtype == jnp.float32
+            else jax.lax.Precision.DEFAULT
+        )
+        q = q_ref[...].astype(jnp.float32) if in_dtype == jnp.float32 else q_ref[...]
+        k_tile = k_ref[...].astype(jnp.float32) if in_dtype == jnp.float32 else k_ref[...]
+        v_tile = v_ref[...].astype(jnp.float32) if in_dtype == jnp.float32 else v_ref[...]
 
         col_ids = jax.lax.broadcasted_iota(jnp.int32, mask_shape, 1) + kb * block_size
         keep = jnp.logical_and(row_ids < seq_len, col_ids < seq_len)
@@ -347,7 +354,7 @@ def _pallas_tpu_block_list_attn_kernel(
                 q,
                 k_tile,
                 (((1,), (1,)), ((), ())),
-                precision=jax.lax.Precision.HIGHEST,
+                precision=dot_prec,
                 preferred_element_type=jnp.float32,
             )
             * sm_scale
@@ -371,10 +378,11 @@ def _pallas_tpu_block_list_attn_kernel(
 
         d_model = q.shape[-1]
         alpha_o = _tile_lanes_to_dim(alpha, d_model)
+        p_dot = p if in_dtype == jnp.float32 else p.astype(v_tile.dtype)
         o_curr = jax.lax.dot(
-            p,
+            p_dot,
             v_tile,
-            precision=jax.lax.Precision.HIGHEST,
+            precision=dot_prec,
             preferred_element_type=jnp.float32,
         )
         acc_scratch_ref[...] = acc_prev * alpha_o + o_curr
@@ -391,6 +399,57 @@ def _pallas_tpu_block_list_attn_kernel(
         ) < seq_len
         out = jnp.where(row_valid_d, acc_scratch_ref[...] / l_bcast, 0.0)
         out_ref[...] = out.astype(out_ref.dtype)
+
+
+@functools.lru_cache(maxsize=64)
+def _get_cached_tpu_pallas_fn(
+    zh_chunk: int,
+    nb: int,
+    block_size: int,
+    D: int,
+    seq_len: int,
+    is_causal: bool,
+    scale: float,
+    max_steps: int,
+    q_dtype,
+):
+    def kv_index_map(zh, qb, step, lists_ref, counts_ref):
+        cnt = counts_ref[zh, qb]
+        safe_step = jnp.minimum(step, jnp.maximum(cnt - 1, 0))
+        kb = lists_ref[zh, qb, safe_step]
+        return (zh, kb, 0, 0)
+
+    tpu_kernel = functools.partial(
+        _pallas_tpu_block_list_attn_kernel,
+        seq_len=seq_len,
+        block_size=block_size,
+        is_causal=bool(is_causal),
+        sm_scale=scale,
+        max_steps=max_steps,
+    )
+    grid_spec = pltpu.PrefetchScalarGridSpec(
+        num_scalar_prefetch=2,
+        in_specs=[
+            pl.BlockSpec((None, None, block_size, D), lambda zh, qb, step, l_ref, c_ref: (zh, qb, 0, 0)),
+            pl.BlockSpec((None, None, block_size, D), kv_index_map),
+            pl.BlockSpec((None, None, block_size, D), kv_index_map),
+        ],
+        out_specs=pl.BlockSpec((None, None, block_size, D), lambda zh, qb, step, l_ref, c_ref: (zh, qb, 0, 0)),
+        scratch_shapes=[
+            pltpu.VMEM((block_size, _TPU_NUM_LANES), jnp.float32),
+            pltpu.VMEM((block_size, _TPU_NUM_LANES), jnp.float32),
+            pltpu.VMEM((block_size, D), jnp.float32),
+        ],
+        grid=(zh_chunk, nb, max_steps),
+    )
+    return pl.pallas_call(
+        tpu_kernel,
+        out_shape=jax.ShapeDtypeStruct((zh_chunk, nb, block_size, D), q_dtype),
+        grid_spec=grid_spec,
+        compiler_params=pltpu.CompilerParams(
+            dimension_semantics=("parallel", "parallel", "arbitrary")
+        ),
+    )
 
 
 def _pallas_block_list_attn_kernel(
@@ -462,6 +521,8 @@ def pallas_block_list_attention(
     local_blocks: int = 0,
     sm_scale: Optional[float] = None,
     interpret: bool = False,
+    precomputed_lists_counts: Optional[Tuple[jnp.ndarray, jnp.ndarray]] = None,
+    max_steps_static: Optional[int] = None,
 ) -> jnp.ndarray:
     """Block-list sparse attention using a Pallas kernel with online softmax.
 
@@ -480,6 +541,10 @@ def pallas_block_list_attention(
         local_blocks: local sliding window radius in route blocks.
         sm_scale: softmax scale (defaults to 1 / sqrt(D)).
         interpret: run Pallas in CPU interpret mode.
+        precomputed_lists_counts: optional `(lists, counts)` tuple from `build_block_lists_jax`
+            to avoid recomputing block lists inside benchmark loops.
+        max_steps_static: optional integer upper bound on active blocks per query block
+            to avoid host-device sync (`int(jnp.max(counts))`) during execution.
 
     Returns:
         out: (Z, H, N, D) attention output, same dtype as q.
@@ -494,13 +559,16 @@ def pallas_block_list_attention(
         )
 
     scale = float(sm_scale) if sm_scale is not None else 1.0 / math.sqrt(D)
-    lists, counts = build_block_lists_jax(
-        router_indices,
-        req_depth,
-        is_causal=is_causal,
-        sink_block=sink_block,
-        local_blocks=local_blocks,
-    )
+    if precomputed_lists_counts is not None:
+        lists, counts = precomputed_lists_counts
+    else:
+        lists, counts = build_block_lists_jax(
+            router_indices,
+            req_depth,
+            is_causal=is_causal,
+            sink_block=sink_block,
+            local_blocks=local_blocks,
+        )
 
     pad_len = nb * block_size - N
     if pad_len > 0:
@@ -519,48 +587,54 @@ def pallas_block_list_attention(
     use_interpret = interpret or (jax.default_backend() != "tpu")
     if not use_interpret:
         counts_2d = counts.reshape(ZH, nb)
-        max_steps = max(1, int(jnp.max(counts_2d)))
+        if max_steps_static is not None:
+            max_steps = max(1, min(nb, int(max_steps_static)))
+        else:
+            max_steps = max(1, int(jnp.max(counts_2d)))
 
-        def kv_index_map(zh, qb, step, lists_ref, counts_ref):
-            cnt = counts_ref[zh, qb]
-            safe_step = jnp.minimum(step, jnp.maximum(cnt - 1, 0))
-            kb = lists_ref[zh, qb, safe_step]
-            return (zh, kb, 0, 0)
+        # Slice lists_flat to [:, :, :max_steps] so SMEM only stores active slots,
+        # not all `nb` columns (saves 5-10x SMEM at N=16K..32K).
+        lists_trimmed = lists_flat[:, :, :max_steps]
 
-        tpu_kernel = functools.partial(
-            _pallas_tpu_block_list_attn_kernel,
-            seq_len=N,
-            block_size=block_size,
-            is_causal=bool(is_causal),
-            sm_scale=scale,
-            max_steps=max_steps,
+        bytes_per_head = nb * (max_steps + 1) * 4
+        max_heads_per_call = max(1, _TPU_SMEM_BUDGET_BYTES // max(1, bytes_per_head))
+        zh_chunk = ZH
+        while zh_chunk > max_heads_per_call or (ZH % zh_chunk != 0):
+            zh_chunk -= 1
+            if zh_chunk <= 1:
+                zh_chunk = 1
+                break
+
+        pallas_fn = _get_cached_tpu_pallas_fn(
+            zh_chunk,
+            nb,
+            block_size,
+            D,
+            N,
+            bool(is_causal),
+            scale,
+            max_steps,
+            q.dtype,
         )
-        grid_spec = pltpu.PrefetchScalarGridSpec(
-            num_scalar_prefetch=2,
-            in_specs=[
-                pl.BlockSpec((None, None, block_size, D), lambda zh, qb, step, l_ref, c_ref: (zh, qb, 0, 0)),
-                pl.BlockSpec((None, None, block_size, D), kv_index_map),
-                pl.BlockSpec((None, None, block_size, D), kv_index_map),
-            ],
-            out_specs=pl.BlockSpec((None, None, block_size, D), lambda zh, qb, step, l_ref, c_ref: (zh, qb, 0, 0)),
-            scratch_shapes=[
-                pltpu.VMEM((block_size, _TPU_NUM_LANES), jnp.float32),
-                pltpu.VMEM((block_size, _TPU_NUM_LANES), jnp.float32),
-                pltpu.VMEM((block_size, D), jnp.float32),
-            ],
-            grid=(ZH, nb, max_steps),
-        )
-        pallas_fn = pl.pallas_call(
-            tpu_kernel,
-            out_shape=jax.ShapeDtypeStruct((ZH, nb, block_size, D), q.dtype),
-            grid_spec=grid_spec,
-            compiler_params=pltpu.CompilerParams(
-                dimension_semantics=("parallel", "parallel", "arbitrary")
-            ),
-        )
-        out_blocks = _call_with_mosaic_version_fallback(
-            pallas_fn, lists_flat, counts_2d, q_blocks, k_blocks, v_blocks
-        )
+        if zh_chunk == ZH:
+            out_blocks = _call_with_mosaic_version_fallback(
+                pallas_fn, lists_trimmed, counts_2d, q_blocks, k_blocks, v_blocks
+            )
+        else:
+            chunks = []
+            for start_zh in range(0, ZH, zh_chunk):
+                end_zh = start_zh + zh_chunk
+                chunks.append(
+                    _call_with_mosaic_version_fallback(
+                        pallas_fn,
+                        lists_trimmed[start_zh:end_zh],
+                        counts_2d[start_zh:end_zh],
+                        q_blocks[start_zh:end_zh],
+                        k_blocks[start_zh:end_zh],
+                        v_blocks[start_zh:end_zh],
+                    )
+                )
+            out_blocks = jnp.concatenate(chunks, axis=0)
     else:
         counts_flat = counts.reshape(ZH, nb, 1)
         q_idx = jnp.broadcast_to(jnp.arange(nb, dtype=jnp.int32)[None, :, None], (ZH, nb, 1))
