@@ -221,7 +221,10 @@ class DynamicTopologyRouter(nn.Module):
                 flux_per_level.append(torch.norm(triad_pump, p=2, dim=-1))
                 damping = torch.exp(-nu * (float(self.p) ** (2 * ell)) * 1e-3)
                 u_next = damping * (u_prev + f_ell + triad_pump)
-                triad_logit = torch.einsum("bhnm,hpm->bhnp", triad_pump, self.triad_readout[:, ell - 1].float())
+                triad_scale = math.sqrt(float(self.in_dim) / max(1.0, float(self.d_shell)))
+                triad_logit = triad_scale * torch.einsum(
+                    "bhnm,hpm->bhnp", triad_pump, self.triad_readout[:, ell - 1].float()
+                )
                 shell_logits.append(base_5d[:, :, :, ell, :] + damping * triad_logit)
                 u_prev = u_next
 
@@ -328,29 +331,28 @@ class DynamicTopologyRouter(nn.Module):
     @staticmethod
     def compute_load_balance_loss(assignments: torch.Tensor) -> torch.Tensor:
         """
-        Hierarchical Multi-Shell Switch Load Balancing Loss.
+        Switch Transformer-style load balancing loss over root-to-leaf paths (in float32).
 
-        Balances joint prefix path probabilities across all intermediate shells
-        l = 0 .. min(L, 6)-1 (preventing deep levels from collapsing onto level 0).
+        Computes the joint probability of the full root-to-leaf path so product-rule
+        gradients wake up all tree levels simultaneously at Step 0 without over-penalizing
+        the laminar root shell l=0 relative to deep leaf shells.
         """
         B, H, S, L, p = assignments.shape
         a_f32 = assignments.float()
-        f_marg = (a_f32.detach() > 0.5).float().mean(dim=2)
-        P_marg = a_f32.mean(dim=2)
-        total_loss = (f_marg * P_marg).sum(dim=-1).mean() * float(p)
-
-        max_depth = min(L, 6)
-        if max_depth > 1 and (p ** max_depth) <= 4096:
+        if L <= 8 and (p ** L) <= 4096:
             joint_P = a_f32[..., 0, :]
-            shell_losses = []
-            for l in range(1, max_depth):
-                joint_P = (joint_P.unsqueeze(-1) * a_f32[..., l, :].unsqueeze(-2)).reshape(B, H, S, -1)
-                num_paths = joint_P.shape[-1]
-                f_l = (joint_P.detach() > 0.5).float().mean(dim=2)
-                P_l = joint_P.mean(dim=2)
-                shell_losses.append((f_l * P_l).sum(dim=-1).mean() * float(num_paths))
-            total_loss = 0.5 * total_loss + 0.5 * (sum(shell_losses) / len(shell_losses))
-        return total_loss
+            for l in range(1, L):
+                joint_P = joint_P.unsqueeze(-1) * a_f32[..., l, :].unsqueeze(-2)
+                joint_P = joint_P.view(B, H, S, -1)
+            num_paths = p ** L
+            f = (joint_P.detach() > 0.5).float().mean(dim=2)
+            P = joint_P.mean(dim=2)
+            loss = (f * P).sum(dim=-1).mean() * float(num_paths)
+        else:
+            f = (a_f32.detach() > 0.5).float().mean(dim=2)
+            P = a_f32.mean(dim=2)
+            loss = (f * P).sum(dim=-1).mean() * float(p)
+        return loss
 
     @staticmethod
     def get_tau_schedule(
@@ -456,9 +458,11 @@ def compute_expected_block_distance(assignments: torch.Tensor, p: int = 2) -> to
     Computes the differentiable expected p-adic (cophenetic) distance directly at
     block granularity without expanding to N x N tokens.
 
-    Uses a Straight-Through leaky prefix product in the backward pass to eliminate
-    the cummin tie-breaking zero-gradient starvation at deeper tree shells ell >= 1,
-    while preserving the exact ultrametric prefix distance in the forward pass.
+    Uses `M.cummin` in the forward pass and adds a depth-covariant dyadic STE
+    tie-breaking residual in the backward pass (`w_ell = 0.05 * 2^(ell - (L-1))`),
+    eliminating Step-0 cummin tie-breaking starvation at deeper shells ell >= 1
+    while keeping the root shell ell=0 laminar (preventing the 5x root-shattering
+    bias of unweighted prefix products).
     """
     levels = assignments.shape[-2]
     if assignments.dim() == 5:
@@ -470,9 +474,10 @@ def compute_expected_block_distance(assignments: torch.Tensor, p: int = 2) -> to
 
     P_prefix = M.cummin(dim=-1)[0]
     if M.requires_grad:
-        M_leaky = 0.95 * M.clamp(min=0.0, max=1.0) + 0.05
-        P_soft = torch.cumprod(M_leaky, dim=-1)
-        P_prefix = P_prefix.detach() - P_soft.detach() + P_soft
+        ell_idx = torch.arange(levels, device=M.device, dtype=M.dtype)
+        dyadic_w = 0.05 * (2.0 ** (ell_idx - (levels - 1)))
+        P_tiebreak = M * dyadic_w
+        P_prefix = P_prefix + (P_tiebreak - P_tiebreak.detach())
     sum_P = P_prefix.sum(dim=-1)
     return levels - sum_P
 
