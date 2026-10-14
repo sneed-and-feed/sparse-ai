@@ -1,0 +1,322 @@
+{
+  "meta": {
+    "date": "2026-10-14T04:55:42.046491+00:00",
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    "vram_total_gb": 94.97,
+    "torch": "2.11.0+cu130",
+    "model_id": "google/gemma-4-26B-A4B-it",
+    "router_sidecar": "/content/sparse-ai/checkpoints/gemma4_26b_router_v3.safetensors",
+    "sidecar_metadata": {
+      "format": "sparse-ai-router-sidecar-v3",
+      "model_type": "gemma4",
+      "name_or_path": "google/gemma-4-26B-A4B-it",
+      "patched_layers": "[5, 11, 17, 23, 29]",
+      "surgical_tree_depth": "5",
+      "surgical_p": "2",
+      "surgical_qk_mode": "True",
+      "surgical_prime_arities": "[2, 3]",
+      "surgical_swin_shift": "True",
+      "surgical_route_stride": "2",
+      "surgical_route_block": "128",
+      "model_id": "google/gemma-4-26B-A4B-it",
+      "train_steps": "80",
+      "train_max_length": "2048"
+    }
+  },
+  "prefill_wall": [
+    {
+      "status": "OK",
+      "seq_len": 2048,
+      "latency_ms": 179.9,
+      "tok_per_s": 11383.9,
+      "peak_vram_gb": 51.72,
+      "activation_vram_gb": 0.6,
+      "block_density": 1.0,
+      "condition": "dense_sdpa",
+      "speedup_vs_dense": 1.0
+    },
+    {
+      "status": "OK",
+      "seq_len": 2048,
+      "latency_ms": 210.03,
+      "tok_per_s": 9750.8,
+      "peak_vram_gb": 51.75,
+      "activation_vram_gb": 0.65,
+      "block_density": null,
+      "condition": "eager_um@3",
+      "speedup_vs_dense": 0.86
+    },
+    {
+      "status": "OK",
+      "seq_len": 2048,
+      "latency_ms": 187.59,
+      "tok_per_s": 10917.6,
+      "peak_vram_gb": 51.23,
+      "activation_vram_gb": 0.62,
+      "block_density": 0.8442,
+      "condition": "block_list@3",
+      "speedup_vs_dense": 0.96
+    },
+    {
+      "status": "OK",
+      "seq_len": 2048,
+      "latency_ms": 186.88,
+      "tok_per_s": 10958.8,
+      "peak_vram_gb": 51.23,
+      "activation_vram_gb": 0.62,
+      "block_density": 0.8138,
+      "condition": "block_list@4",
+      "speedup_vs_dense": 0.96
+    },
+    {
+      "status": "OK",
+      "seq_len": 4096,
+      "latency_ms": 337.57,
+      "tok_per_s": 12133.8,
+      "peak_vram_gb": 51.85,
+      "activation_vram_gb": 1.24,
+      "block_density": 1.0,
+      "condition": "dense_sdpa",
+      "speedup_vs_dense": 1.0
+    },
+    {
+      "status": "OK",
+      "seq_len": 4096,
+      "latency_ms": 451.75,
+      "tok_per_s": 9066.9,
+      "peak_vram_gb": 54.8,
+      "activation_vram_gb": 4.2,
+      "block_density": null,
+      "condition": "eager_um@3",
+      "speedup_vs_dense": 0.75
+    },
+    {
+      "status": "OK",
+      "seq_len": 4096,
+      "latency_ms": 358.07,
+      "tok_per_s": 11438.9,
+      "peak_vram_gb": 51.85,
+      "activation_vram_gb": 1.24,
+      "block_density": 0.8165,
+      "condition": "block_list@3",
+      "speedup_vs_dense": 0.94
+    },
+    {
+      "status": "OK",
+      "seq_len": 4096,
+      "latency_ms": 356.44,
+      "tok_per_s": 11491.5,
+      "peak_vram_gb": 51.85,
+      "activation_vram_gb": 1.24,
+      "block_density": 0.7644,
+      "condition": "block_list@4",
+      "speedup_vs_dense": 0.95
+    },
+    {
+      "status": "OK",
+      "seq_len": 8192,
+      "latency_ms": 831.64,
+      "tok_per_s": 9850.4,
+      "peak_vram_gb": 53.12,
+      "activation_vram_gb": 2.5,
+      "block_density": 1.0,
+      "condition": "dense_sdpa",
+      "speedup_vs_dense": 1.0
+    },
+    {
+      "status": "OK",
+      "seq_len": 8192,
+      "latency_ms": 1283.25,
+      "tok_per_s": 6383.8,
+      "peak_vram_gb": 66.63,
+      "activation_vram_gb": 16.02,
+      "block_density": null,
+      "condition": "eager_um@3",
+      "speedup_vs_dense": 0.65
+    },
+    {
+      "status": "OK",
+      "seq_len": 8192,
+      "latency_ms": 892.79,
+      "tok_per_s": 9175.7,
+      "peak_vram_gb": 53.13,
+      "activation_vram_gb": 2.51,
+      "block_density": 0.7936,
+      "condition": "block_list@3",
+      "speedup_vs_dense": 0.93
+    },
+    {
+      "status": "OK",
+      "seq_len": 8192,
+      "latency_ms": 884.76,
+      "tok_per_s": 9259.0,
+      "peak_vram_gb": 53.13,
+      "activation_vram_gb": 2.51,
+      "block_density": 0.7324,
+      "condition": "block_list@4",
+      "speedup_vs_dense": 0.94
+    },
+    {
+      "status": "OK",
+      "seq_len": 16384,
+      "latency_ms": 2414.34,
+      "tok_per_s": 6786.1,
+      "peak_vram_gb": 55.75,
+      "activation_vram_gb": 5.13,
+      "block_density": 1.0,
+      "condition": "dense_sdpa",
+      "speedup_vs_dense": 1.0
+    },
+    {
+      "status": "OOM",
+      "seq_len": 16384,
+      "latency_ms": null,
+      "tok_per_s": null,
+      "peak_vram_gb": null,
+      "activation_vram_gb": null,
+      "block_density": null,
+      "condition": "eager_um@3",
+      "speedup_vs_dense": null
+    },
+    {
+      "status": "OK",
+      "seq_len": 16384,
+      "latency_ms": 2619.92,
+      "tok_per_s": 6253.6,
+      "peak_vram_gb": 55.78,
+      "activation_vram_gb": 5.16,
+      "block_density": 0.7736,
+      "condition": "block_list@3",
+      "speedup_vs_dense": 0.92
+    },
+    {
+      "status": "OK",
+      "seq_len": 16384,
+      "latency_ms": 2585.61,
+      "tok_per_s": 6336.6,
+      "peak_vram_gb": 55.78,
+      "activation_vram_gb": 5.14,
+      "block_density": 0.7062,
+      "condition": "block_list@4",
+      "speedup_vs_dense": 0.93
+    },
+    {
+      "status": "OK",
+      "seq_len": 32768,
+      "latency_ms": 7604.16,
+      "tok_per_s": 4309.2,
+      "peak_vram_gb": 61.4,
+      "activation_vram_gb": 10.76,
+      "block_density": 1.0,
+      "condition": "dense_sdpa",
+      "speedup_vs_dense": 1.0
+    },
+    {
+      "condition": "eager_um@3",
+      "status": "OOM",
+      "seq_len": 32768,
+      "latency_ms": null,
+      "tok_per_s": null,
+      "peak_vram_gb": null,
+      "activation_vram_gb": null,
+      "block_density": null,
+      "speedup_vs_dense": null
+    },
+    {
+      "status": "OK",
+      "seq_len": 32768,
+      "latency_ms": 8377.24,
+      "tok_per_s": 3911.6,
+      "peak_vram_gb": 61.45,
+      "activation_vram_gb": 10.84,
+      "block_density": 0.7724,
+      "condition": "block_list@3",
+      "speedup_vs_dense": 0.91
+    },
+    {
+      "status": "OK",
+      "seq_len": 32768,
+      "latency_ms": 8229.65,
+      "tok_per_s": 3981.7,
+      "peak_vram_gb": 61.46,
+      "activation_vram_gb": 10.78,
+      "block_density": 0.6989,
+      "condition": "block_list@4",
+      "speedup_vs_dense": 0.92
+    }
+  ],
+  "train_wall": [
+    {
+      "status": "OK",
+      "seq_len": 2048,
+      "latency_ms": 2471.0,
+      "peak_vram_gb": 88.81,
+      "activation_vram_gb": 38.13,
+      "condition": "eager_train@3",
+      "speedup_vs_eager": 1.0
+    },
+    {
+      "status": "OK",
+      "seq_len": 2048,
+      "latency_ms": 578.97,
+      "peak_vram_gb": 66.01,
+      "activation_vram_gb": 15.38,
+      "condition": "block_list_train@3",
+      "speedup_vs_eager": 4.27
+    },
+    {
+      "status": "OOM",
+      "seq_len": 4096,
+      "latency_ms": null,
+      "peak_vram_gb": null,
+      "activation_vram_gb": null,
+      "condition": "eager_train@3",
+      "speedup_vs_eager": null
+    },
+    {
+      "status": "OK",
+      "seq_len": 4096,
+      "latency_ms": 1318.38,
+      "peak_vram_gb": 81.82,
+      "activation_vram_gb": 25.95,
+      "condition": "block_list_train@3",
+      "speedup_vs_eager": null
+    },
+    {
+      "condition": "eager_train@3",
+      "status": "OOM",
+      "seq_len": 8192,
+      "latency_ms": null,
+      "peak_vram_gb": null,
+      "activation_vram_gb": null,
+      "speedup_vs_eager": null
+    },
+    {
+      "status": "OOM",
+      "seq_len": 8192,
+      "latency_ms": null,
+      "peak_vram_gb": null,
+      "activation_vram_gb": null,
+      "condition": "block_list_train@3",
+      "speedup_vs_eager": null
+    },
+    {
+      "condition": "eager_train@3",
+      "status": "OOM",
+      "seq_len": 16384,
+      "latency_ms": null,
+      "peak_vram_gb": null,
+      "activation_vram_gb": null,
+      "speedup_vs_eager": null
+    },
+    {
+      "status": "OOM",
+      "seq_len": 16384,
+      "latency_ms": null,
+      "peak_vram_gb": null,
+      "activation_vram_gb": null,
+      "condition": "block_list_train@3",
+      "speedup_vs_eager": null
+    }
+  ]
+}
