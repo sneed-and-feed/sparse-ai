@@ -2,7 +2,7 @@
 
 **Date**: October 13, 2026  
 **Hardware**: NVIDIA RTX PRO 6000 Blackwell Server Edition (`101.97 GB` / `96 GiB` GDDR7, SM120, PyTorch `2.11.0+cu130`, Triton `3.6.0`)  
-**Target Model**: `Qwen/Qwen3-14B` (`bfloat16`, 40 layers, 5:1 GQA, `head_dim=128`, QK-Norm)  
+**Target Model**: `meta-llama/Meta-Llama-3.1-8B-Instruct` (`bfloat16`, 32 layers, 4:1 GQA, `head_dim=128`)  
 **Benchmark Notebook**: [`notebooks/colab_h100_frontier_surgery.ipynb`](../notebooks/colab_h100_frontier_surgery.ipynb)  
 **Raw QASPER Predictions**: [`results/qasper_router_predictions_block_list.jsonl`](../results/qasper_router_predictions_block_list.jsonl)  
 **Commits**: `e400c1e`, `effadf4`, `3cc33b1`
@@ -13,17 +13,18 @@
 
 This report documents the end-to-end validation of the **V3+ Ultrametric Synthesis** across Tracks 1, 2, and 3 on an **NVIDIA RTX PRO 6000 Blackwell Server Edition (96 GB)** GPU:
 - **Track 2 (Fused Triton Block-List Compaction + Sparse Backward Autograd)**: Replaced the multi-launch PyTorch `argsort`/`nonzero` block-list builder with a single-launch Triton scan (`_build_block_lists_kernel`) and added two-pass sparse FlashAttention-2 backward kernels (`_block_list_bwd_dq_kernel`, `_block_list_bwd_dkdv_kernel`) with Straight-Through Estimator (`soft_block_bias`) router gradients.
-- **Track 1 (Post-RoPE QK Routing + Multi-Prime GQA Forests + Swin Shift + Tiled KL-Lagrangian Distillation)**: Upgraded `SurgicalLlamaAttention` (`qk_mode=True`, `prime_arities=[2, 3]`, `swin_shift=True`, `route_stride=2`, `distill_kl=True`) and evaluated on **LongBench QASPER** (`Qwen/Qwen3-14B`, `bfloat16`).
+- **Track 1 (Post-RoPE QK Routing + Multi-Prime GQA Forests + Swin Shift + Tiled KL-Lagrangian Distillation)**: Upgraded `SurgicalLlamaAttention` (`qk_mode=True`, `prime_arities=[2, 3]`, `swin_shift=True`, `route_stride=2`, `distill_kl=True`) and evaluated on **LongBench QASPER** (`meta-llama/Meta-Llama-3.1-8B-Instruct`, `bfloat16`).
 - **Track 3 (`SurprisalAdelicCache` + `SpeculativeSurgicalGenerator`)**: Validated two-tier Outlier Shield + Medoid Condenser KV-cache compression and zero-VRAM-overhead self-speculative decoding (`draft_req_depth=4`, `verify_req_depth=0`).
 
 ### Headline Empirical Findings
 1. **`72–88 µs` Constant-Time Block-List Compaction & `3.72x` Forward+Backward Speedup**:
    - `_build_block_lists_kernel` executes in **0.072 ms (`72 µs`)** at $N = 32,768$ across $H = 32$ heads.
    - End-to-end `ListBuild + SparseFwd + SparseBwd` achieves **1.68x speedup** at $N = 8,192$, **2.65x speedup** at $N = 16,384$, and **3.72x speedup** (`23.61 ms` vs `87.94 ms` PyTorch SDPA) at $N = 32,768$.
-2. **LongBench QASPER (`Qwen/Qwen3-14B`, $n=50$)**:
+2. **LongBench QASPER (`meta-llama/Meta-Llama-3.1-8B-Instruct`, $n=50$)**:
    - **`routed@2` (`43.45 F1`) matches `dense` (`43.42 F1`) with zero loss** (`+0.03 F1` overall, **`+0.64 F1` above dense** on non-truncated $\le 8\text{K}$ documents: `47.67` vs `47.03`), outperforming budget-matched local window attention (`window@2`: `28.98 F1`) by **`+14.47 F1`** (`95% CI [+5.5, +23.0]`).
    - **`routed@3` (`40.64 F1` at `57.5%` active budget)** retains **93.6% of dense F1** while outperforming budget-matched `window@3` (`20.45 F1`) by **`+20.19 F1`** (`95% CI [+9.4, +31.0]`).
    - **`routed@4` (`31.65 F1` at `43.0%` active budget)** outperforms budget-matched `window@4` (`12.29 F1`) by **`+19.36 F1`** (`95% CI [+10.9, +28.3]`).
+   - **Direct V2 $\to$ V3+ Comparison on `Meta-Llama-3.1-8B-Instruct`**: In the V2 paper (`papers/llama_surgery.md`), `routed@3` scored `33.2 F1` (`-3.9` below dense `37.1`) and `routed@4` scored `26.8 F1`. With the V3+ upgrades (`qk_mode`, `prime_arities=[2,3]`, `swin_shift`, `distill_kl`, `block_list`), `routed@2` matches dense (`43.4 F1`), `routed@3` jumps to **`40.6 F1`** (`+20.2` over window), and `routed@4` jumps to **`31.6 F1`** (`+19.4` over window).
 3. **Track 3 `SurprisalAdelicCache` & Self-Speculative Decoding**:
    - `SurprisalAdelicCache` compressed a `1,354`-token needle-in-a-haystack prompt down to an exact **`512`-token physical KV cache (`2.64x` compression)** while preserving the early-context needle (`948-OMEGA`).
    - `SpeculativeSurgicalGenerator` ($\gamma = 5$, draft $r=4 \to$ verify $r=0$) achieved an **83.87% acceptance rate** and **4.57 tokens per verification step**, generating the exact needle **`9481-OMEGA`**.
@@ -50,10 +51,10 @@ Unlike Hopper SM90 (`228 KB` shared memory per SM), Blackwell SM120 (RTX PRO 600
 
 ---
 
-## 3. Track 1 Benchmark: LongBench QASPER Evaluation (`Qwen/Qwen3-14B`)
+## 3. Track 1 Benchmark: LongBench QASPER Evaluation (`meta-llama/Meta-Llama-3.1-8B-Instruct`)
 
 **Surgical Configuration**:
-- Model: `Qwen/Qwen3-14B` (`bfloat16`, 40 layers, 40 Q heads / 8 KV heads)
+- Model: `meta-llama/Meta-Llama-3.1-8B-Instruct` (`bfloat16`, 32 layers, 32 Q heads / 8 KV heads)
 - Router Architecture: `tree_depth=5`, `qk_mode=True` (Post-RoPE valid-length masked mean + peak-norm pooling), `prime_arities=[2, 3]` (Multi-Prime Adèlic GQA forest), `swin_shift=True` (odd-layer cyclic shift by $B/2 = 64$), `route_stride=2` (cross-layer routing reuse), `preserve_sinks=True`, `local_blocks=1`.
 - Unsupervised Router Warmup: 100 steps on concatenated `wikitext-2-raw-v1` documents at `max_length=4096` (`lr=2e-3`, `distill_kl=True`, `target_density=0.25`), completed in **88 seconds (`1.13 it/s`)** down to LM loss `1.603`.
 
