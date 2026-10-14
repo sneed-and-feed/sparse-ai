@@ -662,6 +662,48 @@ These models present unique architectural challenges: Gemma~4 utilizes deep mult
 
 The surgical injection was entirely layer-agnostic. For Qwen~3.6, the router automatically detected and skipped linear recurrent layers, injecting the $\mathcal{O}(1)$ SRAM Triton kernel strictly into the dense attention blocks. Furthermore, the Medoid-Key selection algorithm perfectly preserved Rotary Position Embedding (RoPE) coherence in both models. By enforcing the logical positional ID across the dynamically pruned cache, the models maintained grounded semantic factual retrieval on the LongBench QASPER dataset from over 10{,}000 tokens of context, despite forcing the physical KV-cache into a tight logarithmic capacity ceiling. For Qwen~3.6, we have also compiled the full topological architecture into a standalone GGUF file (\texttt{adelic-qwen-27b-q8\_0.gguf}), enabling inference via our custom \texttt{llama.cpp} CUDA backend (\url{https://github.com/sneed-and-feed/llama.cpp}, branch \texttt{experimental-gguf-port}) with infinite context bounds locally.
 
+\subsection{V4 Dyadic Hydrodynamics: Skew-Symmetric Triad Cascade Router, Beltrami Triad-Flux KV Condenser, and Full 200-Sample LongBench QASPER Validation}
+\label{sec:v4_hydrodynamics}
+
+Whereas the V3+ \texttt{DynamicTopologyRouter} predicts all $L$ levels of the Bruhat-Tits tree simultaneously from a flat two-layer projection, \textbf{Llama Surgery V4} exploits an exact structural isomorphism between the $p$-adic prefix tree of depth $L$ and the \textbf{Katz--Pavlovi\'c / Tao dyadic wavelet shell model} of fluid turbulence~\citep{katz2005dyadic,tao2016blowup}. In Tao's averaged three-dimensional Navier--Stokes construction, velocity amplitudes live on nested dyadic cubes $Q \in \mathcal{D}_\ell$ of scale $p^{-\ell}$ (an exact Bruhat-Tits tree) and cascade energy strictly across parent-child shells $\ell \to \ell+1$ via skew-symmetric bilinear triad gates.
+
+\paragraph{Skew-Symmetric Dyadic Triad Cascade (\texttt{TriadTopologyRouter}) and Lean 4 Verification (\texttt{TriadConservation.lean}).}
+In \texttt{TriadTopologyRouter}, we replace the flat $L$-level projection with a sequential coarse-to-fine recurrence across low-rank shell states $u_\ell \in \mathbb{R}^{B \times H \times N \times d_{\text{shell}}}$ ($d_{\text{shell}} = 8$):
+\begin{equation}
+    u_0 = u_0^{(0)}, \qquad u_{\ell+1} = u_{\ell+1}^{(0)} + \lambda_\ell \tanh\!\big(B_\ell(u_\ell, u_{\ell+1}^{(0)})\big), \quad \ell = 0, \dots, L-2,
+\end{equation}
+where $B_\ell(u_\ell, v_{\ell+1}) = ((A_\ell - A_\ell^\top) u_\ell) \odot (W_{\text{child},\ell} v_{\ell+1})$ is a skew-projected bilinear triad interaction, $\lambda_\ell \in \mathbb{R}^H$ is initialized to $0$ (inviscid laminar ground state), and per-shell branch readouts are scaled by $\sqrt{d_{\text{in}} / d_{\text{shell}}}$ before adding the deterministic collapse homotopy bias $b_\ell = [+5, -5, \dots, -5]$. Across all 32 layers of \texttt{Meta-Llama-3.1-8B-Instruct}, the V4 triad cascade adds only $20.48$\,KB ($11.58$\,MB vs.\ $11.56$\,MB \texttt{.safetensors} sidecar). In \texttt{TriadConservation.lean} (0 \texttt{sorry}s), we formally verify pairwise skew-symmetric triad orthogonality (\texttt{bilinearTriad\_orthogonality}), exact $L$-shell telescoping energy conservation $\sum_{\ell=0}^{L-1} \langle u_\ell, \dot{u}_\ell \rangle = 0$ (\texttt{total\_shell\_energy\_conservation}), the inviscid laminar ground state at $\lambda_\ell = 0$ (\texttt{inviscid\_homotopy\_ground\_state}), the scale-covariant $p$-adic heat kernel bound $0 < \exp(-\nu p^{2\ell} \operatorname{Var}(P_S)) \le 1$ (\texttt{viscous\_dissipation\_bound}), and closed-form geometric convergence of the Zeno cascade time series (\texttt{zeno\_cascade\_geometric\_convergence}).
+
+\paragraph{The Prefix-Product vs.\ Depth-Covariant Dyadic \texttt{cummin} STE Gradient Scaling Law.}
+Evaluating V4 across the full 200-sample LongBench QASPER validation set uncovered a fundamental gradient-scaling law under Dual Lagrangian density control. Under an unweighted prefix product $P_\ell = \prod_{m=0}^\ell M_{ij,m}$ (\texttt{cumprod} STE, commit \texttt{7e85004}), differentiating expected shared prefix depth $S = \sum_{\ell=0}^{L-1} P_\ell$ near the dense homotopy start ($M_{ij,m} \approx 1$) yields $\partial S / \partial M_{ij,k} \approx L - k \propto [5, 4, 3, 2, 1]$, causing the Dual Lagrangian penalty to fracture coarse root shells ($\ell=0,1$) $5\times$ and $4\times$ harder than leaf shells ($\ell=4$). Replacing \texttt{cumprod} with the exact ultrametric prefix Bottleneck $P_\ell^{\text{Bottleneck}} = \min_{0 \le m \le \ell} M_{ij,m}$ (\texttt{torch.cummin}) paired with a \textbf{depth-covariant dyadic tie-breaking STE} $w_\ell = 0.05 \cdot 2^{\ell - (L-1)} \propto 2^\ell$ and leaf-path Switch load-balancing (commit \texttt{ddaa2ac}) restores a true coarse-to-fine Bruhat-Tits hierarchy ($75.2\% \to 60.5\% \to 49.2\%$ active causal budget on QASPER; $87.9\% \to 77.2\% \to 62.5\% \to 51.4\% \to 42.5\%$ on NIAH).
+
+\begin{table}[h]
+\centering
+\caption{Full 200-sample LongBench QASPER evaluation ($n=200$, $1{,}400$ total generations) on \texttt{Meta-Llama-3.1-8B-Instruct} comparing V4 \texttt{TriadTopologyRouter} under Depth-Covariant Dyadic \texttt{cummin} STE (\texttt{ddaa2ac}) vs.\ Unweighted \texttt{cumprod} STE (\texttt{7e85004}) and budget-matched sliding windows.}
+\label{tab:qasper_v4}
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+Regime & Condition & QASPER F1 ($n=200$) & 95\% CI & Degen & $\Delta$ vs.\ Window (95\% CI) \\
+\midrule
+Dense Ceiling & \texttt{dense} & \textbf{43.23} & $[38.42, 48.03]$ & 0/200 & --- \\
+\midrule
+V4 Dyadic \texttt{cummin} STE & \texttt{routed@2} ($75.2\%$) & \textbf{35.78} & $[31.76, 39.73]$ & 0/200 & $\mathbf{+7.89}$ ($[+2.39, +13.66]$) \\
+V4 Dyadic \texttt{cummin} STE & \texttt{window@2} ($75.2\%$) & 27.89 & $[23.10, 32.86]$ & 0/200 & --- \\
+V4 Dyadic \texttt{cummin} STE & \texttt{routed@3} ($60.5\%$) & \textbf{29.10} & $[25.15, 33.34]$ & 0/200 & $\mathbf{+6.06}$ ($[+1.37, +10.78]$) \\
+V4 Dyadic \texttt{cummin} STE & \texttt{window@3} ($60.5\%$) & 23.04 & $[18.53, 27.51]$ & 0/200 & --- \\
+V4 Dyadic \texttt{cummin} STE & \texttt{routed@4} ($49.2\%$) & \textbf{22.89} & $[19.03, 27.03]$ & 0/200 & $\mathbf{+0.78}$ ($[-4.28, +5.41]$) \\
+V4 Dyadic \texttt{cummin} STE & \texttt{window@4} ($49.2\%$) & 22.10 & $[17.78, 26.46]$ & 0/200 & --- \\
+\midrule
+V4 Unweighted \texttt{cumprod} STE & \texttt{routed@2} ($75.2\%$) & 27.53 & $[23.34, 31.98]$ & 1/200 & $-0.66$ ($[-5.70, +4.42]$) \\
+V4 Unweighted \texttt{cumprod} STE & \texttt{routed@3} ($66.7\%$) & 24.49 & $[20.52, 28.75]$ & 2/200 & $-0.85$ ($[-5.48, +4.16]$) \\
+V4 Unweighted \texttt{cumprod} STE & \texttt{routed@4} ($58.1\%$) & 22.13 & $[18.24, 26.22]$ & 3/200 & $-1.36$ ($[-6.67, +4.29]$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Results Across QASPER ($n=200$), Banal NIAH ($n=50$), and Track 3 Hydrodynamic Inference.}
+As shown in Table~\ref{tab:qasper_v4}, depth-covariant dyadic \texttt{cummin} STE (\texttt{ddaa2ac}) improves \texttt{routed@2} by $+8.25$\,F1 ($27.53 \to 35.78$\,F1) and \texttt{routed@3} by $+4.61$\,F1 ($24.49 \to 29.10$\,F1) with zero degenerate outputs across all $1{,}400$ generations, achieving statistically significant gains over budget-matched sliding windows at both \texttt{routed@2} ($+7.89$\,F1, 95\% CI $[+2.39, +13.66]$) and \texttt{routed@3} ($+6.06$\,F1, 95\% CI $[+1.37, +10.78]$). On the 50-position Banal NIAH sweep ($N=4{,}096$, needle \texttt{"spherical coordinates"}), V4 \texttt{TriadTopologyRouter} outperforms the V3+ baseline ($98.0\% / 92.0\% / 88.0\%$ at $r=1,2,3$) under both STE regimes: achieving $\mathbf{100.0\% / 98.0\% / 92.0\%}$ at $r=1,2,3$ ($58.0\% / 30.0\%$ at $r=4,5$ with $51.4\% / 42.5\%$ causal budget) under dyadic \texttt{cummin} STE and $\mathbf{100.0\% / 100.0\% / 98.0\% / 80.0\% / 58.0\%}$ across $r=1..5$ ($62.1\% / 55.7\%$ budget at $r=4,5$) under \texttt{cumprod} STE. Finally, in Track~3 inference, \texttt{BeltramiAdelicCache} combines normalized post-RoPE adjacent Key triad flux with a 5-token bidirectional local neighborhood context filter and $p$-adic viscous RoPE decay $\gamma_\ell(t) = \exp(-\nu p^{2\ell} \operatorname{Var}(P_S))$, compressing $1{,}354$ prompt tokens to $512$ physical KV tokens ($2.64\times$ compression) while recovering the exact 10/10 passkey \texttt{9481-OMEGA} (resolving the \texttt{948-OMEGA} trailing-digit truncation of V3 \texttt{SurprisalAdelicCache}), while \texttt{ZenoSpeculativeGenerator} achieves an $83.87\%$ acceptance rate and $4.57$ tokens/verify-step (\texttt{mean\_draft\_depth = 1.10}).
+
 % ==============================================================================
 % 5. DISCUSSION
 % ═══════════════════════════════════════════════════════════════
@@ -681,7 +723,7 @@ The surgical injection was entirely layer-agnostic. For Qwen~3.6, the router aut
 
 \textbf{Implications for memory scaling.} The \texttt{AdelicCache} condensation result (Section~\ref{sec:kv_cache}) demonstrates that the physical KV cache tensor can be maintained at a strict capacity ceiling while the logical sequence position continues to advance without bound. The Medoid-Value pooling strategy resolves the fundamental RoPE coherence problem that prevents naive Key averaging: by averaging only the Values (which are invariant to positional rotation) and selecting the Medoid Key as the cluster anchor, the cache preserves exact relative position encoding while compressing the far-history memory footprint. This transforms the memory complexity of the generation loop from $O(N)$ to $O(W + \log N)$, where $W$ is the local dense window size.
 
-\textbf{Limitations.} (1)~The router was trained on a compact corpus (367 samples, 200 steps on WikiText-2, or 80 steps for NIAH); larger-scale router training on massive pretraining corpora may yield further improved routing decisions. (2)~The Triton kernel is forward-only; training still uses the $O(N^2)$ PyTorch dense path. (3)~The router adds $\sim$2\% parameter overhead per layer (backbone + route heads). (4)~GQA compatibility requires broadcasting the KV heads before applying the per-head topology mask. (5)~The 40\,GB A100 VRAM ceiling limits single-GPU prefill to 16k tokens; 80\,GB GPUs or tensor parallelism would be required for the full 128k context window. (6)~While production runtime inference and bounded-memory decoding are validated on 31B and 27B models via custom \texttt{llama.cpp} kernels, end-to-end continuous pretraining of both backbone and router at the 30B+ scale remains future work.
+\textbf{Limitations.} (1)~While we expanded LongBench QASPER evaluation to the full $n=200$ validation set in Section~\ref{sec:v4_hydrodynamics} (confirming statistically significant gains for V4 \texttt{TriadTopologyRouter} at \texttt{routed@2} and \texttt{routed@3}), the router warmup corpus remains compact (80--200 steps on WikiText-2); larger-scale router pretraining on multi-billion-token corpora may yield further improved routing decisions at extreme depths ($r \ge 4$). (2)~Whereas the initial Triton kernel was forward-only, our V3+ two-pass Triton Sparse FlashAttention-2 backward kernel and $O(N B^2)$ Block-KL-Lagrangian objective eliminate $O(N^2)$ training matrices. (3)~The router adds only $\sim$0.02\%--0.14\% parameter overhead ($11.56$--$11.58$\,MB \texttt{.safetensors} sidecar for Llama~3.1~8B; $12.36$\,MB for Gemma~4~26B-A4B). (4)~While production runtime inference and bounded-memory decoding are validated on 31B and 27B models via custom \texttt{llama.cpp} kernels, end-to-end continuous pretraining of both backbone and router at the 30B+ scale remains future work.
 
 % ═══════════════════════════════════════════════════════════════
 % 6. RELATED WORK
@@ -696,18 +738,20 @@ The surgical injection was entirely layer-agnostic. For Qwen~3.6, the router aut
 
 \textbf{Sparse Attention in Pre-Trained Models.} LongLoRA~\citep{chen2024longlora} uses shifted sparse attention with LoRA for long-context extension. MInference~\citep{jiang2024minference} identifies and exploits sparse attention patterns at inference time without retraining. Our approach differs in that the sparsity pattern is \emph{learned} during a short fine-tuning phase, not extracted post-hoc.
 
+\textbf{Distributed Sparse Attention.} MTraining~\citep{li2025mtraining} identifies the exact bottleneck resolved by Topological Ring Attention: ``with dynamic sparsity, reduced per-worker computation amplifies communication overhead, making it a dominant bottleneck.'' They propose hierarchical sparse ring attention, achieving up to $6\times$ training throughput on 32 A100s. While their focus is training-phase only and worker imbalance cuts realized speedup to a third of theoretical at 95\% sparsity (serving as a practical reality-check companion to our synthetic speedups), it validates the need for communication-aware sparsity. Mesh-Attention~\citep{chen2025meshattention} introduces 2D tiling covering ring attention as a special case, achieving a measured 85.4\% max and 79.0\% average communication-volume reduction on 256 GPUs. Their 79.0\% real-hardware measurement provides strong converging evidence for our 78.1\% analytical edge-count reduction; furthermore, the approaches are orthogonal and composable, combining their physical topology redesign with our dynamic content-based routing.
+
 \textbf{Mixture of Experts.} Switch Transformer~\citep{fedus2022switch} and subsequent work~\citep{jiang2024mixtral} use learned routing for sparse feedforward computation. Our load-balancing loss follows their formulation, but applies it to \emph{attention} routing rather than expert dispatch.
 
-\textbf{Hierarchical Tree Routing and Ultrametric Distances.} Hierarchical clustering and tree metrics have a long history in sequence analysis and computational biology~\citep{bradley2010mumford}. Discrete prefix trees naturally induce an ultrametric space where distance satisfies the strong triangle inequality $d(x,z) \le \max(d(x,y), d(y,z))$. Our work operationalizes hierarchical prefix sharing as a differentiable inductive bias for hardware-accelerated attention and KV-cache compression, backed by machine-checked analytical proofs in Lean~4 (\texttt{OnlineSoftmax.lean}, \texttt{AttentionError.lean}, \texttt{PrefixSparsity.lean}, \texttt{RoPECoherence.lean}).
+\textbf{Hierarchical Tree Routing, Ultrametric Distances, and Dyadic Shell Hydrodynamics.} Hierarchical clustering and tree metrics have a long history in sequence analysis and computational biology~\citep{bradley2010mumford}, while dyadic wavelet trees on $p$-adic cubes provide the mathematical foundation for shell models of fluid turbulence~\citep{katz2005dyadic} and averaged Navier--Stokes dynamics~\citep{tao2016blowup}. Discrete prefix trees naturally induce an ultrametric space where distance satisfies the strong triangle inequality $d(x,z) \le \max(d(x,y), d(y,z))$. Our work operationalizes both hierarchical prefix sharing and skew-symmetric parent-to-child dyadic triad cascades as differentiable inductive biases for hardware-accelerated attention and KV-cache compression, backed by machine-checked analytical proofs in Lean~4 (\texttt{OnlineSoftmax.lean}, \texttt{AttentionError.lean}, \texttt{PrefixSparsity.lean}, \texttt{RoPECoherence.lean}, \texttt{TriadConservation.lean}).
 
 % ═══════════════════════════════════════════════════════════════
 % 7. CONCLUSION
 % ═══════════════════════════════════════════════════════════════
 \section{Conclusion}
 
-Llama Surgery demonstrates that pre-trained dense language models can be continuously sparsified via differentiable topology injection, without retraining from scratch, distillation, or post-hoc pruning. The True Tree conditional router discovers content-based block-sparse attention patterns that are grounded in hierarchical prefix tree geometry, backed by formal Lean~4 verifications (\texttt{OnlineSoftmax.lean}, \texttt{AttentionError.lean}, \texttt{PrefixSparsity.lean}, \texttt{RoPECoherence.lean}), compatible with the Hugging Face ecosystem, and directly executable by a custom Triton kernel optimized for modern GPU architectures.
+Llama Surgery demonstrates that pre-trained dense and hybrid-MoE language models can be continuously sparsified via differentiable topology injection, without retraining from scratch, full-matrix distillation, or post-hoc pruning. The True Tree conditional router and V4 Dyadic Triad Cascade router (\texttt{TriadTopologyRouter}) discover content-based block-sparse attention patterns grounded in hierarchical prefix tree geometry and skew-symmetric dyadic shell hydrodynamics, backed by formal Lean~4 verifications (\texttt{OnlineSoftmax.lean}, \texttt{AttentionError.lean}, \texttt{PrefixSparsity.lean}, \texttt{RoPECoherence.lean}, \texttt{TriadConservation.lean}), compatible with the Hugging Face ecosystem via lightweight \texttt{.safetensors} sidecars, and directly executable by hardware-native Block-List kernels in Triton (GPU) and JAX Pallas (Cloud TPU v6e-1).
 
-When evaluated on swept Needle-In-A-Haystack benchmarks ($N=4{,}096$), the router exhibits a clean phase transition: unsupervised pretraining on general natural text allows the model to retain 100\% recall at 75\% sparsity ($K=1024$) and 98\% recall at 87.5\% sparsity ($K=512$) on in-distribution banal needles, disproving the concern that sparse routing relies on high-entropy outlier artifacts. When forced to perform exact sequence retrieval, the router spontaneously induces an ultrametric cophenetic hierarchy on the context window, with the multi-head architecture producing a forest ensemble of 32 independent trees rather than a single global hierarchy. Furthermore, simulated Ring Attention confirms that the emergent topology induces consistent block-level distance separation between semantic domains, achieving a 78.1\% peer-to-peer bandwidth reduction. On real-world QA tasks like QASPER LongBench, the router vastly outperforms same-budget sliding window baselines and approaches dense ceilings. Finally, native deployment in \texttt{llama.cpp} on 31B and 27B open weights demonstrates that topological pruning scales to frontier architectures, delivering real-time throughput while strictly bounding physical VRAM overhead.
+When evaluated on swept Needle-In-A-Haystack benchmarks ($N=4{,}096$), unsupervised pretraining on general natural text allows the model to retain 100\% recall at $r=1$ and 98\%--100\% recall at $r=2$ ($92\%$--$98\%$ at $r=3$ with V4 \texttt{TriadTopologyRouter}) on in-distribution banal needles, while inducing a multi-head forest of 32 ultrametric trees that achieves a 78.1\% peer-to-peer bandwidth reduction in Topological Ring Attention. On LongBench QASPER, V4 \texttt{TriadTopologyRouter} with depth-covariant dyadic \texttt{cummin} STE achieves statistically significant gains across the full 200-sample validation set ($1{,}400$ generations, 0 degenerate outputs) at both \texttt{routed@2} ($35.78$ vs.\ $27.89$\,F1, $+7.89$\,F1, 95\% CI $[+2.39, +13.66]$) and \texttt{routed@3} ($29.10$ vs.\ $23.04$\,F1, $+6.06$\,F1, 95\% CI $[+1.37, +10.78]$), while \texttt{BeltramiAdelicCache} ($2.64\times$ KV compression with exact 10/10 \texttt{9481-OMEGA} retention), \texttt{ZenoSpeculativeGenerator} ($83.87\%$ acceptance rate, $4.57$ tokens/step), and native deployment in \texttt{llama.cpp} on 31B and 27B open weights deliver real-time throughput with strictly bounded physical VRAM overhead.
 
 The model learns to route. The kernel executes the route. The surgeon preserves the patient.
 
@@ -758,6 +802,11 @@ Jiang, H., Li, Y., Zhang, C., et~al. (2024).
 \newblock MInference 1.0: Accelerating Pre-Filling for Long-Context LLMs via Dynamic Sparse Attention.
 \newblock \emph{NeurIPS 2024}.
 
+\bibitem[Katz \& Pavlovi\'c(2005)]{katz2005dyadic}
+Katz, N.~H. \& Pavlovi\'c, N. (2005).
+\newblock Finite time blow-up for a dyadic model of the Euler equations.
+\newblock \emph{Transactions of the American Mathematical Society}, 357(2), 695--708.
+
 \bibitem[Khrennikov(2004)]{khrennikov2004padic}
 Khrennikov, A.~Y. (2004).
 \newblock \emph{$p$-Adic Valued Distributions in Mathematical Physics}.
@@ -777,6 +826,11 @@ Milakov, M. \& Gimelshein, N. (2018).
 Savarese, P., Silva, H., \& Maire, M. (2020).
 \newblock Winning the Lottery with Continuous Sparsification.
 \newblock \emph{NeurIPS 2020}.
+
+\bibitem[Tao(2016)]{tao2016blowup}
+Tao, T. (2016).
+\newblock Finite time blowup for an averaged three-dimensional Navier-Stokes equation.
+\newblock \emph{Journal of the American Mathematical Society}, 29(3), 601--674.
 
 \bibitem[Xiao et~al.(2023)]{xiao2023efficient}
 Xiao, G., Tian, Y., Chen, B., Han, S., \& Lewis, M. (2023).
@@ -823,6 +877,17 @@ Karpathy, A. (2015).
 \newblock char-rnn.
 \newblock \emph{GitHub repository}.
 
+\bibitem[Li et~al.(2025)]{li2025mtraining}
+Li, W., Zhang, C., Jiang, H., Li, Y., Yang, Y., \& Qiu, L. (2025).
+\newblock MTraining: Distributed Dynamic Sparse Attention for Efficient Ultra-Long Context Training.
+\newblock \emph{arXiv:2510.18830}.
+
+\bibitem[Chen et~al.(2025)]{chen2025meshattention}
+Chen, S., Chen, J., Zhu, S., Jiang, Z., Peng, Y., \& Qian, X. (2025).
+\newblock Mesh-Attention: A New Communication-Efficient Distributed Attention with Improved Data Locality.
+\newblock \emph{arXiv:2512.20968}.
+
 \end{thebibliography}
 
 \end{document}
+
