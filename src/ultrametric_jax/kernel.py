@@ -8,6 +8,33 @@ from jax.experimental import pallas as pl
 from jax.experimental.pallas import tpu as pltpu
 
 
+import re
+
+
+def _call_with_mosaic_version_fallback(fn, *args, **kwargs):
+    """Executes a Pallas TPU call, automatically adjusting `tpu_custom_call._FWD_COMPAT_VERSION`
+    if the Colab TPU runtime's installed `libtpu` expects an older Mosaic serialization version
+    than `jaxlib` emits by default (e.g. `Unsupported version: expected <= 7 but got 8`).
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        msg = str(e)
+        m = re.search(r"Unsupported version:\s*expected\s*<=\s*(\d+)\s*but\s*got\s*(\d+)", msg)
+        if m is not None:
+            target_ver = int(m.group(1))
+            try:
+                import jax._src.tpu_custom_call as tcc
+                tcc._FWD_COMPAT_VERSION = target_ver
+                tcc.ir_version_override = lambda: target_ver
+            except Exception:
+                pass
+            if hasattr(fn, "clear_cache"):
+                fn.clear_cache()
+            return fn(*args, **kwargs)
+        raise
+
+
 def _bruhat_tits_kernel(
     routing_vectors,
     req_depth,
@@ -76,13 +103,7 @@ def out_index_map(i, j, routing_vectors, req_depth):
 
 
 @functools.partial(jax.jit, static_argnames=['block_size', 'interpret'])
-def bruhat_tits_matmul(x, weight, routing_vectors, req_depth, block_size=128, interpret=False):
-    """
-    x: (num_blocks * block_size, hidden_dim)
-    weight: (num_blocks, num_blocks, hidden_dim, out_dim)
-    routing_vectors: (num_blocks, tree_depth)
-    req_depth: scalar integer specifying phylogenetic ancestor depth required.
-    """
+def _bruhat_tits_matmul_jit(x, weight, routing_vectors, req_depth, block_size=128, interpret=False):
     num_blocks = routing_vectors.shape[0]
     hidden_dim = x.shape[1]
     out_dim = weight.shape[3]
@@ -126,6 +147,19 @@ def bruhat_tits_matmul(x, weight, routing_vectors, req_depth, block_size=128, in
         ),
         interpret=interpret,
     )(routing_vectors, req_depth, x, weight)
+
+
+def bruhat_tits_matmul(x, weight, routing_vectors, req_depth, block_size=128, interpret=False):
+    """
+    x: (num_blocks * block_size, hidden_dim)
+    weight: (num_blocks, num_blocks, hidden_dim, out_dim)
+    routing_vectors: (num_blocks, tree_depth)
+    req_depth: scalar integer specifying phylogenetic ancestor depth required.
+    """
+    return _call_with_mosaic_version_fallback(
+        _bruhat_tits_matmul_jit, x, weight, routing_vectors, req_depth,
+        block_size=block_size, interpret=interpret
+    )
 
 
 # ============================================================================
@@ -428,14 +462,17 @@ def pallas_block_list_attention(
             ],
             grid=(ZH, nb, max_steps),
         )
-        out_blocks = pl.pallas_call(
+        pallas_fn = pl.pallas_call(
             tpu_kernel,
             out_shape=jax.ShapeDtypeStruct((ZH, nb, block_size, D), q.dtype),
             grid_spec=grid_spec,
             compiler_params=pltpu.CompilerParams(
                 dimension_semantics=("parallel", "parallel", "arbitrary")
             ),
-        )(lists_flat, counts_2d, q_blocks, k_blocks, v_blocks)
+        )
+        out_blocks = _call_with_mosaic_version_fallback(
+            pallas_fn, lists_flat, counts_2d, q_blocks, k_blocks, v_blocks
+        )
     else:
         counts_flat = counts.reshape(ZH, nb, 1)
         q_idx = jnp.broadcast_to(jnp.arange(nb, dtype=jnp.int32)[None, :, None], (ZH, nb, 1))
