@@ -220,3 +220,103 @@ def inject_surgery(model, **kwargs):
     and copies over the pre-trained q_proj, k_proj, v_proj, o_proj weights.
     """
     return patch_llama_model(model, **kwargs)
+
+
+def save_router_sidecar(model, path: str, extra_metadata: dict = None) -> dict:
+    """
+    Saves all DynamicTopologyRouter parameters and Dual Lagrangian density_lambda buffers
+    from a surgically-patched model into a compact `.safetensors` sidecar file (~15-40 MB),
+    embedding the surgical topology configuration into the safetensors header metadata.
+    """
+    import json
+    import os
+    import torch
+
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    layers = _discover_decoder_layers(model)
+    tensors = {}
+    patched_layer_indices = []
+
+    for i, layer in enumerate(layers):
+        attn = getattr(layer, "self_attn", None)
+        if attn is None or not hasattr(attn, "router"):
+            continue
+        patched_layer_indices.append(i)
+        for k, v in attn.router.state_dict().items():
+            tensors[f"layers.{i}.self_attn.router.{k}"] = v.detach().contiguous().cpu()
+        if hasattr(attn, "density_lambda") and isinstance(attn.density_lambda, torch.Tensor):
+            tensors[f"layers.{i}.self_attn.density_lambda"] = attn.density_lambda.detach().contiguous().cpu()
+
+    if not tensors:
+        raise RuntimeError("No SurgicalLlamaAttention routers found on model to save.")
+
+    cfg = model.config
+    meta = {
+        "format": "sparse-ai-router-sidecar-v3",
+        "model_type": str(getattr(cfg, "model_type", type(model).__name__)),
+        "name_or_path": str(getattr(cfg, "_name_or_path", "")),
+        "patched_layers": json.dumps(patched_layer_indices),
+        "surgical_tree_depth": str(getattr(cfg, "surgical_tree_depth", 5)),
+        "surgical_p": str(getattr(cfg, "surgical_p", 2)),
+        "surgical_qk_mode": str(bool(getattr(cfg, "surgical_qk_mode", False))),
+        "surgical_prime_arities": json.dumps(getattr(cfg, "surgical_prime_arities", None)),
+        "surgical_swin_shift": str(bool(getattr(cfg, "surgical_swin_shift", False))),
+        "surgical_route_stride": str(getattr(cfg, "surgical_route_stride", 1)),
+        "surgical_route_block": str(getattr(cfg, "surgical_route_block", 128)),
+    }
+    if extra_metadata:
+        for k, v in extra_metadata.items():
+            meta[str(k)] = str(v) if isinstance(v, str) else json.dumps(v)
+
+    try:
+        from safetensors.torch import save_file
+        save_file(tensors, path, metadata=meta)
+    except ImportError:
+        torch.save({"tensors": tensors, "metadata": meta}, path)
+
+    size_mb = os.path.getsize(path) / (1024 * 1024)
+    print(f"[RouterSidecar] Saved {len(tensors)} tensors across {len(patched_layer_indices)} layers to {path} ({size_mb:.2f} MB)")
+    return meta
+
+
+def load_router_sidecar(model, path: str, strict: bool = True) -> dict:
+    """
+    Loads a `.safetensors` router sidecar into a surgically-patched model.
+    Returns the metadata dictionary stored in the sidecar header.
+    """
+    import torch
+
+    meta = {}
+    try:
+        from safetensors import safe_open
+        from safetensors.torch import load_file
+        with safe_open(path, framework="pt", device="cpu") as f:
+            meta = f.metadata() or {}
+        tensors = load_file(path, device="cpu")
+    except Exception:
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        tensors = ckpt.get("tensors", ckpt)
+        meta = ckpt.get("metadata", {})
+
+    layers = _discover_decoder_layers(model)
+    loaded_layers = 0
+    for i, layer in enumerate(layers):
+        attn = getattr(layer, "self_attn", None)
+        if attn is None or not hasattr(attn, "router"):
+            continue
+        prefix = f"layers.{i}.self_attn.router."
+        router_sd = {
+            k[len(prefix):]: v.to(device=next(attn.router.parameters()).device, dtype=next(attn.router.parameters()).dtype)
+            for k, v in tensors.items()
+            if k.startswith(prefix)
+        }
+        if router_sd:
+            attn.router.load_state_dict(router_sd, strict=strict)
+            loaded_layers += 1
+        lam_key = f"layers.{i}.self_attn.density_lambda"
+        if lam_key in tensors and hasattr(attn, "density_lambda"):
+            attn.density_lambda.copy_(tensors[lam_key].to(attn.density_lambda.device, dtype=attn.density_lambda.dtype))
+
+    print(f"[RouterSidecar] Loaded pre-warmed router weights into {loaded_layers} layers from {path}")
+    return meta
+

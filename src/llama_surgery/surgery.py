@@ -770,6 +770,17 @@ class SurgicalLlamaAttention(nn.Module):
         k = repeat_kv(k, self.num_key_value_groups)
         v = repeat_kv(v, self.num_key_value_groups)
 
+        # Adaptive Context Gate (for hybrid architectures like Gemma 4):
+        # Keep global layers dense when total KV length is below surgical_min_sparse_seq_len
+        min_sparse_len = int(getattr(self.config, "surgical_min_sparse_seq_len", 0) or 0)
+        if (
+            min_sparse_len > 0
+            and k.shape[-2] < min_sparse_len
+            and (not self.training)
+            and getattr(self.config, "surgical_mask_override", None) is None
+        ):
+            req_depth_cfg = 0
+
         # Post-RoPE QK Routing (Milestone 2.1)
         if qk_mode:
             if use_block_list and req_depth_cfg == 0:
@@ -793,6 +804,11 @@ class SurgicalLlamaAttention(nn.Module):
                 self.current_distill_loss = None
 
             if req_depth_cfg == 0:
+                if getattr(self.config, "surgical_collect_stats", False):
+                    S = q.shape[-2]
+                    self.last_mean_allowed_keys = (S + 1) / 2
+                    self.last_mean_causal_keys = (S + 1) / 2
+                    self.last_block_density = 1.0
                 out = F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=self.scale)
             else:
                 r = req_depth_cfg if req_depth_cfg is not None else assignments.shape[-2] // 2
@@ -840,8 +856,8 @@ class SurgicalLlamaAttention(nn.Module):
         # Dynamic Sparsification
         L = k.shape[-2]
         local_window = getattr(self.config, "surgical_local_window", 16)
-        levels = assignments.shape[-2]
-        surgical_req_depth = getattr(self.config, "surgical_req_depth", None)
+        levels = assignments.shape[-2] if assignments is not None else 5
+        surgical_req_depth = req_depth_cfg if req_depth_cfg == 0 else getattr(self.config, "surgical_req_depth", None)
 
         # FAST INFERENCE PATH (Zero memory churn, O(1) integer prefix comparison)
         is_inference = (not self.training) or (not torch.is_grad_enabled())

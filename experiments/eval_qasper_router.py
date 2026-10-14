@@ -46,7 +46,7 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from llama_surgery import inject_surgery
+from llama_surgery import inject_surgery, save_router_sidecar, load_router_sidecar
 from sweep_topological_niah import warmup_router_wikitext
 
 
@@ -242,6 +242,9 @@ def main():
                          "window@r baselines always use the eager path")
     ap.add_argument("--oracle_mode", action="store_true", help="Evaluate HySparse2-style oracle at matched budget")
     ap.add_argument("--kolibri_rope", action="store_true", help="Strip RoPE from every 5th layer (kolibri pattern)")
+    ap.add_argument("--min_sparse_seq_len", type=int, default=0, help="Keep global layers dense when seq_len < threshold")
+    ap.add_argument("--save_router", default="", help="Optional path to save trained router sidecar (.safetensors)")
+    ap.add_argument("--load_router", default="", help="Optional path to load pre-warmed router sidecar (.safetensors)")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -285,13 +288,19 @@ def main():
     if args.attention_backend == "block_list":
         for cfg in all_cfgs:
             cfg.surgical_attention_backend = "block_list"
-    if not args.skip_warmup:
+    if args.load_router:
+        print(f"[3/4] Loading pre-warmed router sidecar from {args.load_router}")
+        load_router_sidecar(model, args.load_router)
+    elif not args.skip_warmup:
         print(f"[3/4] WikiText warmup ({args.train_steps} steps, max_length={args.train_max_length})")
         warmup_router_wikitext(model, tok, steps=args.train_steps, device="cuda", max_length=args.train_max_length)
+    if args.save_router:
+        save_router_sidecar(model, args.save_router, extra_metadata={"train_steps": args.train_steps, "train_max_length": args.train_max_length})
     model.eval()
     for cfg in all_cfgs:
         cfg.use_cache = True  # HF disables this during gradient checkpointing but doesn't restore it!
         cfg.surgical_attention_backend = args.attention_backend
+        cfg.surgical_min_sparse_seq_len = args.min_sparse_seq_len
         if args.kolibri_rope:
             cfg.surgical_kolibri_rope = True
 
