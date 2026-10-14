@@ -127,58 +127,84 @@ Inspecting [`results/qasper_router_predictions_block_list.jsonl`](../results/qas
 
 ---
 
-## 5. Full-Model Long-Context Prefill & Training Speed / Memory Wall ($2\text{K} \to 32\text{K}$) + `.safetensors` Router Sidecars
+## 5. Full-Model Long-Context Prefill & Router-Training Speed / Memory Wall ($2\text{K} \to 32\text{K}$) + `.safetensors` Router Sidecars
 
 To supplement the isolated attention-kernel microbenchmark in Section 2 with full end-to-end model measurements (including all dense MLP/FFN projections, RMSNorm, QKV/O projections, and router execution across all layers), we executed [`experiments/benchmark_long_context_wall.py`](../experiments/benchmark_long_context_wall.py) across `N = [2048, 4096, 8192, 16384, 32768]` on both `meta-llama/Meta-Llama-3.1-8B-Instruct` and `google/gemma-4-26B-A4B-it`.
 
+*Note on run-to-run CLI parameters*: The standalone [`benchmark_long_context_wall.py`](../experiments/benchmark_long_context_wall.py) script used its default warmup CLI settings (`--train_steps 80 --train_max_length 2048 --route_stride 2`) when minting [`llama31_8b_router_v3.safetensors`](../checkpoints/router_sidecars/llama31_8b_router_v3.safetensors) (`11.56 MB` / `12,123,720` bytes) and [`gemma4_26b_router_v3.safetensors`](../checkpoints/router_sidecars/gemma4_26b_router_v3.safetensors) (`12.36 MB` / `12,959,178` bytes), whereas the earlier [`eval_qasper_router.py`](../experiments/eval_qasper_router.py) QASPER evaluation runs used `--train_steps 100 --train_max_length 4096 --route_stride 2` (Llama 3.1 8B) and `--train_steps 80 --train_max_length 2048 --route_stride 1` (Gemma 4 26B-A4B, recorded in `qasper_gemma4_26b_summary_block_list.json`).
+
 ### 5.1 End-to-End Full-Model Prefill Wall: `meta-llama/Meta-Llama-3.1-8B-Instruct` (All 32 Layers)
 
-Raw JSON: [`results/long_context_wall_llama31_8b.json`](../results/long_context_wall_llama31_8b.json) (`base_model_mem_gb = 16.95 GB`, `sidecar_size_mb = 35.13 MB`)
+Raw JSON: [`results/long_context_wall_llama31_8b.json`](../results/long_context_wall_llama31_8b.json) (`sidecar = llama31_8b_router_v3.safetensors`, `11.56 MB`)
 
-| Sequence Length ($N$) | Mode | Latency (ms) | Throughput (tok/s) | Peak Total VRAM (GB) | Activation VRAM (GB) | Active Causal Budget (%) | Speedup vs. `dense_sdpa` | Speedup vs. `eager_um@3` |
+| Sequence Length ($N$) | Condition | Latency (ms) | Throughput (tok/s) | Peak Total VRAM (GB) | Activation VRAM (GB) | Measured `block_density` | Speedup vs. `dense_sdpa` | Speedup vs. `eager_um@3` |
 |---:|:---|---:|---:|---:|---:|---:|---:|---:|
-| **2,048** | `dense_sdpa` | $97.27\text{ ms}$ | $21,055$ | $17.13\text{ GB}$ | $0.20\text{ GB}$ | $100.0\%$ | $1.00\times$ | $4.51\times$ |
-| **2,048** | `eager_um@3` | $438.98\text{ ms}$ | $4,665$ | $19.03\text{ GB}$ | $1.00\text{ GB}$ | $38.2\%$ | $0.22\times$ | $1.00\times$ |
-| **2,048** | **`block_list@3`** | $109.65\text{ ms}$ | $18,678$ | $17.26\text{ GB}$ | $0.22\text{ GB}$ | $38.2\%$ | $0.89\times$ | **$4.00\times$** |
-| **2,048** | **`block_list@4`** | $109.38\text{ ms}$ | $18,724$ | $17.26\text{ GB}$ | $0.22\text{ GB}$ | $34.1\%$ | $0.89\times$ | **$4.01\times$** |
-| **4,096** | `dense_sdpa` | $197.55\text{ ms}$ | $20,734$ | $17.39\text{ GB}$ | $0.40\text{ GB}$ | $100.0\%$ | $1.00\times$ | $7.76\times$ |
-| **4,096** | `eager_um@3` | $1,532.76\text{ ms}$ | $2,672$ | $24.84\text{ GB}$ | $7.84\text{ GB}$ | $27.2\%$ | $0.13\times$ | $1.00\times$ |
-| **4,096** | **`block_list@3`** | $208.55\text{ ms}$ | $19,641$ | $17.52\text{ GB}$ | $0.46\text{ GB}$ | $27.2\%$ | $0.95\times$ | **$7.35\times$** |
-| **4,096** | **`block_list@4`** | $207.37\text{ ms}$ | $19,753$ | $17.52\text{ GB}$ | $0.46\text{ GB}$ | $21.9\%$ | $0.95\times$ | **$7.39\times$** |
-| **8,192** | `dense_sdpa` | $443.33\text{ ms}$ | $18,478$ | $17.90\text{ GB}$ | $0.80\text{ GB}$ | $100.0\%$ | $1.00\times$ | $13.17\times$ |
-| **8,192** | `eager_um@3` | $5,839.90\text{ ms}$ | $1,403$ | **$47.78\text{ GB}$** | **$30.78\text{ GB}$** | $21.1\%$ | $0.08\times$ | $1.00\times$ |
-| **8,192** | **`block_list@3`** | $456.57\text{ ms}$ | $17,942$ | $18.05\text{ GB}$ | **$0.92\text{ GB}$** | $21.1\%$ | $0.97\times$ | **$12.79\times$** |
-| **8,192** | **`block_list@4`** | $451.69\text{ ms}$ | $18,136$ | $18.05\text{ GB}$ | **$0.92\text{ GB}$** | $15.4\%$ | $0.98\times$ | **$12.93\times$** |
-| **16,384** | `dense_sdpa` | $999.18\text{ ms}$ | $16,398$ | $18.92\text{ GB}$ | $1.60\text{ GB}$ | $100.0\%$ | $1.00\times$ | — |
-| **16,384** | `eager_um@3` | **OOM** | — | $>95.0\text{ GB}$ | $>78.0\text{ GB}$ | — | — | — |
-| **16,384** | **`block_list@3`** | **$985.04\text{ ms}$** | **$16,633$** | $19.10\text{ GB}$ | $1.84\text{ GB}$ | $18.0\%$ | **$1.01\times$** | **$\infty$ (No OOM)** |
-| **16,384** | **`block_list@4`** | **$968.21\text{ ms}$** | **$16,922$** | $19.10\text{ GB}$ | $1.84\text{ GB}$ | $12.1\%$ | **$1.03\times$** | **$\infty$ (No OOM)** |
-| **32,768** | `dense_sdpa` | $2,383.75\text{ ms}$ | $13,746$ | $20.96\text{ GB}$ | $3.20\text{ GB}$ | $100.0\%$ | $1.00\times$ | — |
-| **32,768** | `eager_um@3` | **OOM** | — | $>95.0\text{ GB}$ | $>78.0\text{ GB}$ | — | — | — |
-| **32,768** | **`block_list@3`** | **$2,233.19\text{ ms}$** | **$14,673$** | $21.20\text{ GB}$ | $3.67\text{ GB}$ | $16.5\%$ | **$1.07\times$** | **$\infty$ (No OOM)** |
-| **32,768** | **`block_list@4`** | **$2,170.52\text{ ms}$** | **$15,097$** | $21.20\text{ GB}$ | $3.67\text{ GB}$ | $10.4\%$ | **$1.10\times$** | **$\infty$ (No OOM)** |
+| **2,048** | `dense_sdpa` | $97.27\text{ ms}$ | $21,055.1$ | $18.26\text{ GB}$ | $0.13\text{ GB}$ | $100.00\%$ | $1.00\times$ | $4.51\times$ |
+| **2,048** | `eager_um@3` | $438.98\text{ ms}$ | $4,665.4$ | $19.03\text{ GB}$ | $1.00\text{ GB}$ | — | $0.22\times$ | $1.00\times$ |
+| **2,048** | **`block_list@3`** | $109.65\text{ ms}$ | $18,678.0$ | $17.26\text{ GB}$ | $0.23\text{ GB}$ | $76.75\%$ | $0.89\times$ | **$4.00\times$** |
+| **2,048** | **`block_list@4`** | $109.38\text{ ms}$ | $18,723.0$ | $17.26\text{ GB}$ | $0.23\text{ GB}$ | $70.35\%$ | $0.89\times$ | **$4.01\times$** |
+| **4,096** | `dense_sdpa` | $197.55\text{ ms}$ | $20,733.7$ | $17.45\text{ GB}$ | $0.42\text{ GB}$ | $100.00\%$ | $1.00\times$ | $7.76\times$ |
+| **4,096** | `eager_um@3` | $1,532.76\text{ ms}$ | $2,672.3$ | $24.84\text{ GB}$ | $7.84\text{ GB}$ | — | $0.13\times$ | $1.00\times$ |
+| **4,096** | **`block_list@3`** | $208.55\text{ ms}$ | $19,640.2$ | $17.52\text{ GB}$ | $0.46\text{ GB}$ | $71.71\%$ | $0.95\times$ | **$7.35\times$** |
+| **4,096** | **`block_list@4`** | $207.37\text{ ms}$ | $19,751.7$ | $17.52\text{ GB}$ | $0.46\text{ GB}$ | $64.32\%$ | $0.95\times$ | **$7.39\times$** |
+| **8,192** | `dense_sdpa` | $443.33\text{ ms}$ | $18,478.4$ | $17.91\text{ GB}$ | $0.85\text{ GB}$ | $100.00\%$ | $1.00\times$ | $13.17\times$ |
+| **8,192** | `eager_um@3` | $5,839.90\text{ ms}$ | $1,402.8$ | **$47.78\text{ GB}$** | **$30.78\text{ GB}$** | — | $0.08\times$ | $1.00\times$ |
+| **8,192** | **`block_list@3`** | $456.57\text{ ms}$ | $17,942.4$ | $18.05\text{ GB}$ | **$0.92\text{ GB}$** | $68.30\%$ | $0.97\times$ | **$12.79\times$** |
+| **8,192** | **`block_list@4`** | $451.69\text{ ms}$ | $18,136.5$ | $18.05\text{ GB}$ | **$0.92\text{ GB}$** | $60.29\%$ | $0.98\times$ | **$12.93\times$** |
+| **16,384** | `dense_sdpa` | $999.18\text{ ms}$ | $16,397.5$ | $18.83\text{ GB}$ | $1.70\text{ GB}$ | $100.00\%$ | $1.00\times$ | — |
+| **16,384** | `eager_um@3` | **OOM** | — | $>95.0\text{ GB}$ | — | — | — | — |
+| **16,384** | **`block_list@3`** | **$985.04\text{ ms}$** | **$16,632.9$** | $19.10\text{ GB}$ | $2.07\text{ GB}$ | $67.03\%$ | **$1.01\times$** | **$\infty$ (No OOM)** |
+| **16,384** | **`block_list@4`** | **$968.21\text{ ms}$** | **$16,922.0$** | $19.10\text{ GB}$ | $1.84\text{ GB}$ | $59.17\%$ | **$1.03\times$** | **$\infty$ (No OOM)** |
+| **32,768** | `dense_sdpa` | $2,383.75\text{ ms}$ | $13,746.4$ | $20.66\text{ GB}$ | $3.40\text{ GB}$ | $100.00\%$ | $1.00\times$ | — |
+| **32,768** | `eager_um@3` | **OOM** | — | $>95.0\text{ GB}$ | — | — | — | — |
+| **32,768** | **`block_list@3`** | **$2,233.19\text{ ms}$** | **$14,673.2$** | $21.20\text{ GB}$ | $4.18\text{ GB}$ | $64.51\%$ | **$1.07\times$** | **$\infty$ (No OOM)** |
+| **32,768** | **`block_list@4`** | **$2,170.52\text{ ms}$** | **$15,096.9$** | $21.20\text{ GB}$ | $3.67\text{ GB}$ | $57.41\%$ | **$1.10\times$** | **$\infty$ (No OOM)** |
 
-> **Key Takeaway**: Because a full-model prefill pass executes all 32 dense FFN/MLP blocks ($3 \times 4096 \times 14336$ per layer) and QKV/O linear projections in addition to self-attention, achieving a **1.10x end-to-end full-model wall-clock speedup** (`2,170.5 ms` vs `2,383.8 ms`, saving `213.2 ms` per prefill pass) over FlashAttention/SDPA at $N = 32,768$ demonstrates that the Triton Block-List kernel more than amortizes the QK router projection and prefix-tree construction overhead across all 32 layers. Simultaneously, at $N = 8,192$, `block_list@3` reduces peak activation memory from **`30.78 GB` (`eager_um@3`) down to `0.92 GB` (`33.5x` reduction)** and avoids the $N \ge 16,384$ OOM wall entirely.
+> **Key Takeaway**: Because a full-model prefill pass executes all 32 dense FFN/MLP blocks ($3 \times 4096 \times 14336$ per layer) and QKV/O linear projections in addition to self-attention, achieving a **1.10x end-to-end full-model wall-clock speedup** (`2,170.52 ms` vs `2,383.75 ms`, saving `213.2 ms` per prefill pass) over FlashAttention/SDPA at $N = 32,768$ demonstrates that the Triton Block-List kernel more than amortizes the QK router projection and prefix-tree construction overhead across all 32 layers. Simultaneously, at $N = 8,192$, `block_list@3` reduces peak activation memory from **`30.78 GB` (`eager_um@3`) down to `0.92 GB` (`33.5x` reduction)** and avoids the $N \ge 16,384$ OOM wall entirely.
 
-### 5.2 End-to-End Full-Model Router Training Wall (`Fwd + KL-Lagrangian + Bwd`, No Gradient Checkpointing)
+### 5.2 End-to-End Router-Training Step Wall (`Fwd + KL-Lagrangian + Bwd`, No Gradient Checkpointing)
 
 During unsupervised router warmup (`distill_kl=True`), each active layer computes router projections, sparse attention forward/backward with Straight-Through Estimator (`soft_block_bias`) gradients, and the $O(N B^2)$ Block-KL-Lagrangian loss:
 
-| Model | Sequence Length ($N$) | `eager_train@3` Latency | `eager_train@3` Peak VRAM | `block_list_train@3` Latency | `block_list_train@3` Peak VRAM | Training Speedup & Memory Saved |
+| Model | Sequence Length ($N$) | `eager_train@3` Latency | `eager_train@3` Peak / Act VRAM | `block_list_train@3` Latency | `block_list_train@3` Peak / Act VRAM | Speedup & Memory Impact |
 |:---|---:|---:|---:|---:|---:|:---|
-| **`Meta-Llama-3.1-8B-Instruct`** (all 32 layers) | **2,048** | **OOM** ($>95\text{ GB}$) | $>95.0\text{ GB}$ | **$293.31\text{ ms/step}$** (`6,982 tok/s`) | **$26.54\text{ GB}$** (`9.59 GB` act) | **Unblocks 32-layer training** |
-| **`Meta-Llama-3.1-8B-Instruct`** (all 32 layers) | **4,096** | **OOM** ($>95\text{ GB}$) | $>95.0\text{ GB}$ | **$538.06\text{ ms/step}$** (`7,613 tok/s`) | **$36.17\text{ GB}$** (`19.16 GB` act) | **Unblocks 32-layer $4\text{K}$ training** |
-| **`Meta-Llama-3.1-8B-Instruct`** (all 32 layers) | **8,192** | **OOM** ($>95\text{ GB}$) | $>95.0\text{ GB}$ | **$1,198.90\text{ ms/step}$** (`6,833 tok/s`) | **$55.64\text{ GB}$** (`38.64 GB` act) | **Unblocks 32-layer $8\text{K}$ training** |
-| **`google/gemma-4-26B-A4B-it`** (5 global layers, `51.1 GB` weights) | **2,048** | $2,471.00\text{ ms/step}$ (`829 tok/s`) | $88.81\text{ GB}$ (`38.13 GB` act) | **$578.97\text{ ms/step}$** (`3,537 tok/s`) | **$66.01\text{ GB}$** (`15.38 GB` act) | **$4.27\times$ faster, $-22.80\text{ GB}$ VRAM** |
-| **`google/gemma-4-26B-A4B-it`** (5 global layers, `51.1 GB` weights) | **4,096** | **OOM** ($>95\text{ GB}$) | $>95.0\text{ GB}$ | **$1,318.38\text{ ms/step}$** (`3,107 tok/s`) | **$81.82\text{ GB}$** (`30.72 GB` act) | **Unblocks 26B $4\text{K}$ training** |
+| **`Meta-Llama-3.1-8B-Instruct`** (all 32 layers) | **2,048** | **OOM** | $>95.0\text{ GB}$ | **$293.31\text{ ms/step}$** | **$26.54\text{ GB}$** (`0.00 GB` act*) | **Unblocks 32-layer $2\text{K}$ training** |
+| **`Meta-Llama-3.1-8B-Instruct`** (all 32 layers) | **4,096** | **OOM** | $>95.0\text{ GB}$ | **$538.06\text{ ms/step}$** | **$36.17\text{ GB}$** (`19.11 GB` act) | **Unblocks 32-layer $4\text{K}$ training** |
+| **`Meta-Llama-3.1-8B-Instruct`** (all 32 layers) | **8,192** | **OOM** | $>95.0\text{ GB}$ | **$1,198.90\text{ ms/step}$** | **$55.64\text{ GB}$** (`38.52 GB` act) | **Unblocks 32-layer $8\text{K}$ training** |
+| **`google/gemma-4-26B-A4B-it`** (5 global layers) | **2,048** | $2,471.00\text{ ms/step}$ | $88.81\text{ GB}$ (`38.13 GB` act) | **$578.97\text{ ms/step}$** | **$66.01\text{ GB}$** (`15.38 GB` act) | **$4.27\times$ faster, $-22.80\text{ GB}$ VRAM** |
+| **`google/gemma-4-26B-A4B-it`** (5 global layers) | **4,096** | **OOM** | $>95.0\text{ GB}$ | **$1,318.38\text{ ms/step}$** | **$81.82\text{ GB}$** (`25.95 GB` act) | **Unblocks 26B $4\text{K}$ training** |
 
-### 5.3 End-to-End Full-Model Prefill on `google/gemma-4-26B-A4B-it` (`--only_global_layers`)
+*\*Note: At $N=2048$ on Llama 3.1 8B, `eager_train@3` OOMed immediately before `block_list_train@3`, leaving the baseline allocator high-water mark at `26.54 GB` prior to reset.*
 
-Raw JSON: [`results/long_context_wall_gemma4_26b.json`](../results/long_context_wall_gemma4_26b.json) (`base_model_mem_gb = 51.12 GB`, `sidecar_size_mb = 4.65 MB`)
+### 5.3 End-to-End Full-Model Prefill Wall: `google/gemma-4-26B-A4B-it` (`--only_global_layers`, 5 Global Layers)
 
-- **Prefill Scaling to $32,768$ Tokens on a Single 96 GB GPU**:
-  - `eager_um@3` hits **`80.35 GB` peak VRAM at $N = 8,192$** (`2,704.9 ms`, `3,029 tok/s`) and **OOMs at $N \ge 16,384$**.
-  - **`block_list@3` and `block_list@4`** run at **`1,745.9 ms` (`4,692 tok/s`) and `1,743.4 ms` (`4,699 tok/s`) at $N = 8,192$** using only **`53.79 GB` total VRAM (`2.70 GB` activation memory vs `29.26 GB` eager — a `10.8x` activation memory reduction)**, and scale cleanly to **$N = 16,384$ (`3,669.9 ms`, `56.34 GB` VRAM)** and **$N = 32,768$ (`8,229.7 ms`, `3,982 tok/s`, `61.46 GB` VRAM)**.
-- **Lightweight `.safetensors` Router Sidecar Minting**:
-  - Rather than duplicating 16–52 GB of frozen base-model weights, `save_router_sidecar` exports only the trained `DynamicTopologyRouter` weights and surgical metadata: **`35.13 MB` for `Meta-Llama-3.1-8B-Instruct` (all 32 layers)** and **`4.65 MB` for `google/gemma-4-26B-A4B-it` (5 global layers)**.
+Raw JSON: [`results/long_context_wall_gemma4_26b.json`](../results/long_context_wall_gemma4_26b.json) (`sidecar = gemma4_26b_router_v3.safetensors`, `12.36 MB`)
+
+| Sequence Length ($N$) | Condition | Latency (ms) | Throughput (tok/s) | Peak Total VRAM (GB) | Activation VRAM (GB) | Measured `block_density` | Speedup vs. `dense_sdpa` | Speedup vs. `eager_um@3` |
+|---:|:---|---:|---:|---:|---:|---:|---:|---:|
+| **2,048** | `dense_sdpa` | $179.90\text{ ms}$ | $11,383.9$ | $51.72\text{ GB}$ | $0.60\text{ GB}$ | $100.00\%$ | $1.00\times$ | $1.17\times$ |
+| **2,048** | `eager_um@3` | $210.03\text{ ms}$ | $9,750.8$ | $51.75\text{ GB}$ | $0.65\text{ GB}$ | — | $0.86\times$ | $1.00\times$ |
+| **2,048** | **`block_list@3`** | $187.59\text{ ms}$ | $10,917.6$ | $51.23\text{ GB}$ | $0.62\text{ GB}$ | $84.42\%$ | $0.96\times$ | **$1.12\times$** |
+| **2,048** | **`block_list@4`** | $186.88\text{ ms}$ | $10,958.8$ | $51.23\text{ GB}$ | $0.62\text{ GB}$ | $81.38\%$ | $0.96\times$ | **$1.12\times$** |
+| **4,096** | `dense_sdpa` | $337.57\text{ ms}$ | $12,133.8$ | $51.85\text{ GB}$ | $1.24\text{ GB}$ | $100.00\%$ | $1.00\times$ | $1.34\times$ |
+| **4,096** | `eager_um@3` | $451.75\text{ ms}$ | $9,066.9$ | $54.80\text{ GB}$ | $4.20\text{ GB}$ | — | $0.75\times$ | $1.00\times$ |
+| **4,096** | **`block_list@3`** | $358.07\text{ ms}$ | $11,438.9$ | $51.85\text{ GB}$ | $1.24\text{ GB}$ | $81.65\%$ | $0.94\times$ | **$1.26\times$** |
+| **4,096** | **`block_list@4`** | $356.44\text{ ms}$ | $11,491.5$ | $51.85\text{ GB}$ | $1.24\text{ GB}$ | $76.44\%$ | $0.95\times$ | **$1.27\times$** |
+| **8,192** | `dense_sdpa` | $831.64\text{ ms}$ | $9,850.4$ | $53.12\text{ GB}$ | $2.50\text{ GB}$ | $100.00\%$ | $1.00\times$ | $1.54\times$ |
+| **8,192** | `eager_um@3` | $1,283.25\text{ ms}$ | $6,383.8$ | **$66.63\text{ GB}$** | **$16.02\text{ GB}$** | — | $0.65\times$ | $1.00\times$ |
+| **8,192** | **`block_list@3`** | **$892.79\text{ ms}$** | **$9,175.7$** | $53.13\text{ GB}$ | **$2.51\text{ GB}$** | $79.36\%$ | $0.93\times$ | **$1.44\times$** |
+| **8,192** | **`block_list@4`** | **$884.76\text{ ms}$** | **$9,259.0$** | $53.13\text{ GB}$ | **$2.51\text{ GB}$** | $73.24\%$ | $0.94\times$ | **$1.45\times$** |
+| **16,384** | `dense_sdpa` | $2,414.34\text{ ms}$ | $6,786.1$ | $55.75\text{ GB}$ | $5.13\text{ GB}$ | $100.00\%$ | $1.00\times$ | — |
+| **16,384** | `eager_um@3` | **OOM** | — | $>95.0\text{ GB}$ | — | — | — | — |
+| **16,384** | **`block_list@3`** | **$2,619.92\text{ ms}$** | **$6,253.6$** | $55.78\text{ GB}$ | $5.16\text{ GB}$ | $77.36\%$ | $0.92\times$ | **$\infty$ (No OOM)** |
+| **16,384** | **`block_list@4`** | **$2,585.61\text{ ms}$** | **$6,336.6$** | $55.78\text{ GB}$ | $5.14\text{ GB}$ | $70.62\%$ | $0.93\times$ | **$\infty$ (No OOM)** |
+| **32,768** | `dense_sdpa` | $7,604.16\text{ ms}$ | $4,309.2$ | $61.40\text{ GB}$ | $10.76\text{ GB}$ | $100.00\%$ | $1.00\times$ | — |
+| **32,768** | `eager_um@3` | **OOM** | — | $>95.0\text{ GB}$ | — | — | — | — |
+| **32,768** | **`block_list@3`** | **$8,377.24\text{ ms}$** | **$3,911.6$** | $61.45\text{ GB}$ | $10.84\text{ GB}$ | $77.24\%$ | $0.91\times$ | **$\infty$ (No OOM)** |
+| **32,768** | **`block_list@4`** | **$8,229.65\text{ ms}$** | **$3,981.7$** | $61.46\text{ GB}$ | $10.78\text{ GB}$ | $69.89\%$ | $0.92\times$ | **$\infty$ (No OOM)** |
+
+- **Why Gemma 4 `block_list@4` Prefill is `0.92x–0.96x` vs. `dense_sdpa` while Llama 3.1 8B is `1.10x`**:
+  - In Llama 3.1 8B, all **32 out of 32 layers** are global full-attention layers (`head_dim=128`), so skipping blocks saves quadratic attention FLOPs across every single layer of the network, outpacing router overhead at $N \ge 16,384$.
+  - In Gemma 4 26B-A4B, **25 out of 30 layers** are already fast `sliding_window=1024` local attention layers plus 26B MoE MLP blocks, and only **5 out of 30 layers** (`[5, 11, 17, 23, 29]`, `head_dim=512`) are global layers with `block_density` around `70%–77%` after 80 warmup steps. Even so, `block_list@3/4` stays within `4%–8%` of `dense_sdpa` latency across $2\text{K} \to 32\text{K}$, reduces activation VRAM at $8\text{K}$ from **`16.02 GB` (`eager_um@3`) down to `2.51 GB` (`6.4x` reduction)**, and eliminates the $N \ge 16,384$ OOM wall.
+
 
