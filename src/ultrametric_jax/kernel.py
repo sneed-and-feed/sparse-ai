@@ -284,6 +284,19 @@ def build_block_lists_jax(
     return lists, counts
 
 
+_TPU_NUM_LANES = 128
+
+
+def _tile_lanes_to_dim(x_lanes: jnp.ndarray, target_dim: int) -> jnp.ndarray:
+    """Broadcasts/slices a `(block_size, 128)` lane-replicated tensor to `(block_size, target_dim)`."""
+    repeats, rem = divmod(target_dim, _TPU_NUM_LANES)
+    if rem == 0:
+        return jnp.tile(x_lanes, (1, repeats)) if repeats > 1 else x_lanes
+    if repeats == 0:
+        return x_lanes[:, :target_dim]
+    return jnp.tile(x_lanes, (1, repeats + 1))[:, :target_dim]
+
+
 def _pallas_tpu_block_list_attn_kernel(
     lists_ref,      # SMEM: (ZH, nb, nb) int32
     counts_ref,     # SMEM: (ZH, nb) int32
@@ -291,8 +304,8 @@ def _pallas_tpu_block_list_attn_kernel(
     k_ref,          # VMEM: (block_size, D) for current active step
     v_ref,          # VMEM: (block_size, D) for current active step
     out_ref,        # VMEM: (block_size, D)
-    m_scratch_ref,  # VMEM scratch: (block_size, 1) float32
-    l_scratch_ref,  # VMEM scratch: (block_size, 1) float32
+    m_scratch_ref,  # VMEM scratch: (block_size, 128) float32
+    l_scratch_ref,  # VMEM scratch: (block_size, 128) float32
     acc_scratch_ref,# VMEM scratch: (block_size, D) float32
     *,
     seq_len: int,
@@ -309,14 +322,14 @@ def _pallas_tpu_block_list_attn_kernel(
     safe_step = jnp.minimum(step, jnp.maximum(count - 1, 0))
     kb = lists_ref[zh, qb, safe_step]
 
-    offs_m = qb * block_size + jnp.arange(block_size, dtype=jnp.int32)
-    m_valid = offs_m < seq_len
+    mask_shape = (block_size, block_size)
+    row_ids = jax.lax.broadcasted_iota(jnp.int32, mask_shape, 0) + qb * block_size
 
     @pl.when(step == 0)
     def _init():
-        m_scratch_ref[...] = jnp.full((block_size, 1), -jnp.inf, dtype=jnp.float32)
-        l_scratch_ref[...] = jnp.zeros((block_size, 1), dtype=jnp.float32)
-        acc_scratch_ref[...] = jnp.zeros((block_size, q_ref.shape[-1]), dtype=jnp.float32)
+        m_scratch_ref[...] = jnp.full_like(m_scratch_ref, -jnp.inf)
+        l_scratch_ref[...] = jnp.zeros_like(l_scratch_ref)
+        acc_scratch_ref[...] = jnp.zeros_like(acc_scratch_ref)
 
     @pl.when(step < count)
     def _step():
@@ -324,35 +337,53 @@ def _pallas_tpu_block_list_attn_kernel(
         k_tile = k_ref[...].astype(jnp.float32)
         v_tile = v_ref[...].astype(jnp.float32)
 
-        cols = kb * block_size + jnp.arange(block_size, dtype=jnp.int32)
-        n_valid = cols < seq_len
-        keep = m_valid[:, None] & n_valid[None, :]
+        col_ids = jax.lax.broadcasted_iota(jnp.int32, mask_shape, 1) + kb * block_size
+        keep = jnp.logical_and(row_ids < seq_len, col_ids < seq_len)
         if is_causal:
-            keep = keep & (offs_m[:, None] >= cols[None, :])
+            keep = jnp.logical_and(keep, row_ids >= col_ids)
 
-        qk = jnp.dot(q, k_tile.T, precision=jax.lax.Precision.HIGHEST) * sm_scale
+        qk = (
+            jax.lax.dot_general(
+                q,
+                k_tile,
+                (((1,), (1,)), ((), ())),
+                preferred_element_type=jnp.float32,
+            )
+            * sm_scale
+        )
         qk = jnp.where(keep, qk, -jnp.inf)
 
         m_prev = m_scratch_ref[...]
         l_prev = l_scratch_ref[...]
         acc_prev = acc_scratch_ref[...]
 
-        m_new = jnp.maximum(m_prev, jnp.max(qk, axis=-1, keepdims=True))
+        m_curr = jnp.max(qk, axis=1)[:, None]
+        m_new = jnp.maximum(m_prev, m_curr)
         m_ref = jnp.where(jnp.isneginf(m_new), 0.0, m_new)
         alpha = jnp.exp(m_prev - m_ref)
-        p = jnp.where(keep, jnp.exp(qk - m_ref), 0.0)
 
-        l_scratch_ref[...] = l_prev * alpha + jnp.sum(p, axis=-1, keepdims=True)
-        acc_scratch_ref[...] = acc_prev * alpha + jnp.dot(
-            p, v_tile, precision=jax.lax.Precision.HIGHEST
-        )
+        m_ref_bcast = _tile_lanes_to_dim(m_ref, block_size)
+        p = jnp.where(keep, jnp.exp(qk - m_ref_bcast), 0.0)
+
+        l_curr = jax.lax.broadcast_in_dim(jnp.sum(p, axis=1), l_prev.shape, (0,))
+        l_scratch_ref[...] = l_prev * alpha + l_curr
+
+        d_model = q.shape[-1]
+        alpha_o = _tile_lanes_to_dim(alpha, d_model)
+        o_curr = jax.lax.dot(p, v_tile, preferred_element_type=jnp.float32)
+        acc_scratch_ref[...] = acc_prev * alpha_o + o_curr
         m_scratch_ref[...] = m_new
 
     @pl.when(step == max_steps - 1)
     def _epilogue():
         l_final = l_scratch_ref[...]
         l_safe = jnp.where(l_final == 0.0, 1.0, l_final)
-        out = (acc_scratch_ref[...] / l_safe) * m_valid[:, None].astype(jnp.float32)
+        d_model = out_ref.shape[-1]
+        l_bcast = _tile_lanes_to_dim(l_safe, d_model)
+        row_valid_d = (
+            jax.lax.broadcasted_iota(jnp.int32, (block_size, d_model), 0) + qb * block_size
+        ) < seq_len
+        out = jnp.where(row_valid_d, acc_scratch_ref[...] / l_bcast, 0.0)
         out_ref[...] = out.astype(out_ref.dtype)
 
 
@@ -507,8 +538,8 @@ def pallas_block_list_attention(
             ],
             out_specs=pl.BlockSpec((None, None, block_size, D), lambda zh, qb, step, l_ref, c_ref: (zh, qb, 0, 0)),
             scratch_shapes=[
-                pltpu.VMEM((block_size, 1), jnp.float32),
-                pltpu.VMEM((block_size, 1), jnp.float32),
+                pltpu.VMEM((block_size, _TPU_NUM_LANES), jnp.float32),
+                pltpu.VMEM((block_size, _TPU_NUM_LANES), jnp.float32),
                 pltpu.VMEM((block_size, D), jnp.float32),
             ],
             grid=(ZH, nb, max_steps),
