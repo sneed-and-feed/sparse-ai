@@ -406,7 +406,9 @@ class SurgicalLlamaAttention(nn.Module):
         # Mask non-causal entries to 0.0 before F.kl_div to prevent 0 * (-inf) = NaN in IEEE 754
         student_log_probs_safe = student_log_probs.masked_fill(~causal_mask_4d, 0.0)
 
-        kl_loss = F.kl_div(student_log_probs_safe, teacher_probs, reduction="batchmean")
+        kl_loss = F.kl_div(student_log_probs_safe, teacher_probs, reduction="batchmean") / max(
+            1, block_assignments.shape[1] * NB
+        )
 
         # Dual Lagrangian density control on causal block mask
         soft_block_mask = torch.sigmoid((max_dist - expected_block_dist) / 0.5)

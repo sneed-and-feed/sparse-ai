@@ -304,7 +304,9 @@ def warmup_router_wikitext(
         total_loss.backward()
         optimizer.step()
         
-        pbar.set_postfix({"loss": f"{loss.item():.3f}", "lb_loss": f"{float(lb_loss):.3f}", "distill": f"{float(distill_loss):.3f}"})
+        lb_val = lb_loss.detach().item() if isinstance(lb_loss, torch.Tensor) else float(lb_loss)
+        dist_val = distill_loss.detach().item() if isinstance(distill_loss, torch.Tensor) else float(distill_loss)
+        pbar.set_postfix({"loss": f"{loss.item():.3f}", "lb_loss": f"{lb_val:.3f}", "distill": f"{dist_val:.3f}"})
         
     if hasattr(model, "gradient_checkpointing_disable"):
         model.gradient_checkpointing_disable()
