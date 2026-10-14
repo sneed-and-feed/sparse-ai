@@ -11,8 +11,60 @@ from jax.experimental.pallas import tpu as pltpu
 import re
 
 
+def _apply_mosaic_target_version_patch(target_ver: int) -> None:
+    """Patches `jax._src.tpu_custom_call` so `mosaic-serde` always serializes with `target-version={target_ver}`."""
+    try:
+        import jax._src.tpu_custom_call as tcc
+
+        tcc._FWD_COMPAT_VERSION = target_ver
+        tcc.ir_version_override = lambda: target_ver
+        tcc.get_ir_version = lambda *a, **kw: target_ver
+
+        orig_pm = getattr(tcc, "_orig_PassManager", tcc.PassManager)
+        tcc._orig_PassManager = orig_pm
+
+        class _CompatPassManager:
+            @staticmethod
+            def parse(pipeline_str: str, *args, **kwargs):
+                if "mosaic-serde" in pipeline_str and "serialize=true" in pipeline_str:
+                    if "target-version=" in pipeline_str:
+                        pipeline_str = re.sub(
+                            r"target-version=\d+",
+                            f"target-version={target_ver}",
+                            pipeline_str,
+                        )
+                    else:
+                        pipeline_str = pipeline_str.replace(
+                            "serialize=true",
+                            f"serialize=true target-version={target_ver}",
+                        )
+                return orig_pm.parse(pipeline_str, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(orig_pm, name)
+
+        tcc.PassManager = _CompatPassManager
+
+        if hasattr(tcc, "_lower_mosaic_module_to_asm"):
+            orig_lower = getattr(tcc, "_orig_lower_mosaic_module_to_asm", tcc._lower_mosaic_module_to_asm)
+            tcc._orig_lower_mosaic_module_to_asm = orig_lower
+
+            def _patched_lower_mosaic_module_to_asm(module, *args, **kwargs):
+                if "ir_version" in kwargs or len(args) == 0:
+                    try:
+                        kwargs["ir_version"] = target_ver
+                        return orig_lower(module, *args, **kwargs)
+                    except TypeError:
+                        kwargs.pop("ir_version", None)
+                return orig_lower(module, *args, **kwargs)
+
+            tcc._lower_mosaic_module_to_asm = _patched_lower_mosaic_module_to_asm
+    except Exception:
+        pass
+
+
 def _call_with_mosaic_version_fallback(fn, *args, **kwargs):
-    """Executes a Pallas TPU call, automatically adjusting `tpu_custom_call._FWD_COMPAT_VERSION`
+    """Executes a Pallas TPU call, automatically adjusting `mosaic-serde` `target-version`
     if the Colab TPU runtime's installed `libtpu` expects an older Mosaic serialization version
     than `jaxlib` emits by default (e.g. `Unsupported version: expected <= 7 but got 8`).
     """
@@ -23,14 +75,13 @@ def _call_with_mosaic_version_fallback(fn, *args, **kwargs):
         m = re.search(r"Unsupported version:\s*expected\s*<=\s*(\d+)\s*but\s*got\s*(\d+)", msg)
         if m is not None:
             target_ver = int(m.group(1))
-            try:
-                import jax._src.tpu_custom_call as tcc
-                tcc._FWD_COMPAT_VERSION = target_ver
-                tcc.ir_version_override = lambda: target_ver
-            except Exception:
-                pass
+            _apply_mosaic_target_version_patch(target_ver)
             if hasattr(fn, "clear_cache"):
                 fn.clear_cache()
+            try:
+                jax.clear_caches()
+            except Exception:
+                pass
             return fn(*args, **kwargs)
         raise
 
