@@ -718,7 +718,7 @@ The model learns to route. The kernel executes the route. The surgeon preserves 
 
 ## References
 
-- Aquino-Michaels (2026). Learning to Skip Blocks: Self-Discovered Ultrametric Routing for Hardware-Accelerated Sparse Attention. *Preprint*.
+- sneed-and-feed (2026). Learning to Skip Blocks: Self-Discovered Ultrametric Routing for Hardware-Accelerated Sparse Attention. *Preprint*.
 - Bradley, P. E. (2010). Mumford Dendrograms. *Computer Journal*, 53(4), 393–404.
 - Chen, Y., et al. (2024). LongLoRA: Efficient Fine-Tuning of Long-Context Large Language Models. *ICLR 2024*.
 - Dao, T., et al. (2022). FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness. *NeurIPS 2022*.
